@@ -3,13 +3,13 @@ An application-level protocol for handling block transfers. This should be done 
 
 ## CTP Message
 ### Header
-- Message Type (1 byte), then `CRLF` (2 bytes)
+- Message Type (2 byte)
   - `0`: `STATUS_REQUEST`
   - `1`: `STATUS_RESPONSE`
   - `2`: `MANIFEST_UPDATED`
   - `3`: `BLOCK_REQUEST`
   - `4`: `BLOCK_RESPONSE`
-- Length of Body in bytes (4 bytes), then `CRLF` (2 bytes)
+- Length of Body in bytes (4 bytes)
 
 Total size of header: 9 bytes
 
