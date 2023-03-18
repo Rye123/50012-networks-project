@@ -37,3 +37,15 @@ Depends on message type:
   - File ID
   - Block ID
   - Block Data
+
+## API
+### `CTPPeer(id: int, max_connections: int = 5)`
+A single peer using the CTP protocol.
+
+#### `peer.send_message(msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int=6969)`
+Sends a single `CTPMessage` to the destination. Returns the corresponding response.
+- If the `msg_type` given is a response, the message will not be sent.
+
+#### `peer.listen(src_ip: str='', max_requests:int=1)`
+A blocking function that listens on `(src_ip, src_port)` for CTP connections.
+- Upon receiving a request, it parses it, and constructs an appropriate response.
