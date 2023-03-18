@@ -2,7 +2,7 @@ import struct
 import logging
 from socket import socket, AF_INET, SOCK_STREAM
 from enum import IntEnum
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 logging.basicConfig(level = logging.DEBUG)
 
@@ -12,30 +12,36 @@ class InvalidCTPMessageError(Exception):
         super().__init__(*args)
 
 class CTPMessageType(IntEnum):
-    STATUS_REQUEST = 0
-    STATUS_RESPONSE = 1
-    NOTIFICATION = 2
-    NOTIFICATION_ACK = 3
-    BLOCK_REQUEST = 4
-    BLOCK_RESPONSE = 5
+    STATUS_REQUEST   = 0b0000
+    STATUS_RESPONSE  = 0b0001
+    NOTIFICATION     = 0b0010
+    NOTIFICATION_ACK = 0b0011
+    BLOCK_REQUEST    = 0b0100
+    BLOCK_RESPONSE   = 0b0101
 
 class CTPMessage:
     """
     A message in the Cluster Transfer Protocol.
     - msg_type
-    - body_size
-    - body
+    - data_length
+    - cluster_id
+    - sender_id
+    - data
     """
-    HEADER_LENGTH = 6
-    
+    HEADER_LENGTH = 70
+    ENCODING = 'ascii'
 
     def __init__(self, 
         msg_type: CTPMessageType,
-        data: bytes
+        data: bytes,
+        cluster_id: str = "placeholder cluster",
+        sender_id: str = "placeholder sender"
     ):
         self.msg_type = msg_type
-        self.body_size = len(data)
-        self.body = data
+        self.data_length = len(data)
+        self.data = data
+        self.cluster_id = cluster_id
+        self.sender_id = sender_id
     
     def pack(self) -> bytes:
         """
@@ -43,44 +49,58 @@ class CTPMessage:
         """
         # Assemble packet contents
         packet:bytes = b''
-        packet += struct.pack('!H', self.msg_type.value)  # unsigned short, 2 bytes
-        packet += struct.pack('!I', self.body_size) # unsigned int, 4 bytes
-        packet += self.body
+        packet += struct.pack('!H', self.msg_type.value)                      # unsigned short, 2 bytes
+        packet += struct.pack('!I', self.data_length)                         # unsigned int, 4 bytes
+        packet += struct.pack('!32s', self.cluster_id.encode(self.ENCODING))
+        packet += struct.pack('!32s', self.sender_id.encode(self.ENCODING))
+        
+        packet += self.data
 
         return packet
     
-    @staticmethod
-    def unpack_header(packet_header: bytes) -> Tuple:
+    @classmethod
+    def unpack_header(cls, packet_header: bytes) -> Dict[str, Any]:
         """
         Unpacks only the packet headers.
         """
-        if len(packet_header) != 6:
+        if len(packet_header) != cls.HEADER_LENGTH:
             raise InvalidCTPMessageError("Packet header does not have exactly 6 bytes.")
         
-        headers = struct.unpack('!HI', packet_header)
-        return headers
+        headers = struct.unpack('!HI32s32s', packet_header)
+        return {
+            "msg_type": CTPMessageType(headers[0]),
+            "data_length": headers[1],
+            "cluster_id": bytes(headers[2]).decode(cls.ENCODING),
+            "sender_id": bytes(headers[3]).decode(cls.ENCODING)
+        }
 
-    @staticmethod
-    def unpack(packet: bytes) -> 'CTPMessage':
+    @classmethod
+    def unpack(cls, packet: bytes) -> 'CTPMessage':
         """
         Unpacks a **full packet**.
         """
-        if len(packet) < 6:
+        if len(packet) < cls.HEADER_LENGTH:
             raise InvalidCTPMessageError("Invalid packet")
         
-        headers = CTPMessage.unpack_header(packet[0:6])
+        headers = CTPMessage.unpack_header(packet[0:cls.HEADER_LENGTH])
+        data = packet[cls.HEADER_LENGTH:]
+
         return CTPMessage(
-            CTPMessageType(headers[0]),
-            packet[6:]
+            headers['msg_type'],
+            data,
+            cluster_id=headers['cluster_id'],
+            sender_id=headers['sender_id']
         )
     
     def __repr__(self):
-        return f"{self.msg_type.name}\n\tLength: {self.body_size}\n\tData: {self.body}"
+        return f"{self.msg_type.name}\n\tLength: {self.data_length}\n\tData: {self.data}"
 
     def __eq__(self, message: 'CTPMessage') -> bool:
         return (self.msg_type == message.msg_type) and \
-            (self.body_size == message.body_size) and \
-            (self.body == message.body)
+            (self.cluster_id == message.cluster_id) and \
+            (self.sender_id == message.sender_id) and \
+            (self.data_length == message.data_length) and \
+            (self.data == message.data)
     
 class Connection:
     """
@@ -117,10 +137,10 @@ class Connection:
 
         # Parse, get the length of the data
         headers = CTPMessage.unpack_header(header_b)
-        expected_body_size = headers[1]
+        expected_data_len = headers['data_length']
 
         # Get the rest of the data.
-        data = self._recv(expected_body_size)
+        data = self._recv(expected_data_len)
 
         return CTPMessage.unpack(header_b + data)
 
@@ -183,7 +203,7 @@ class CTPPeer:
         #TODO: Should connection be in another thread?
         return Connection(client_sock)
     
-    def send_message(self, msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int):
+    def send_message(self, msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int = 6969):
         conn = self._connect(dest_ip, dest_port)
         message = CTPMessage(
             msg_type,
@@ -195,7 +215,7 @@ class CTPPeer:
         self._log("info", f"Sending {msg_type.name} with data {data}.")
         response:CTPMessage = None
         match msg_type:
-            #TODO: need to follow body as stated in docs
+            #TODO: need to follow data as stated in docs
             case CTPMessageType.STATUS_REQUEST:
                 conn.send_message(message)
                 response = conn.recv_message()
@@ -210,7 +230,7 @@ class CTPPeer:
             case _:
                 print("Cannot send non-request")
         if response is not None:
-            self._log("info", f"Received response {response.msg_type.name} with data: {response.body}")
+            self._log("info", f"Received response {response.msg_type.name} with data: {response.data}")
         else:
             self._log("warning", f"Non-request detected, cancelling send operation.")
         # Close connection
@@ -238,9 +258,9 @@ class CTPPeer:
             # Respond appropriately
             response:CTPMessage = None
 
-            self._log("info", f"Received {client_msg.msg_type.name} with data {client_msg.body}.")
+            self._log("info", f"Received {client_msg.msg_type.name} with data {client_msg.data}.")
             match client_msg.msg_type:
-                #TODO: create class for response? also need to follow body as stated in docs
+                #TODO: create class for response? also need to follow data as stated in docs
                 case CTPMessageType.STATUS_REQUEST:
                     response = CTPMessage(
                         CTPMessageType.STATUS_RESPONSE,
