@@ -37,6 +37,15 @@ class CTPMessage:
         cluster_id: str = "placeholder cluster",
         sender_id: str = "placeholder sender"
     ):
+        """
+        Initialise a `CTPMessage`.
+
+        # Inputs
+        - `msg_type`: A `CTPMessageType` representing the type of the message.
+        - `data`: The actual data to be encapsulated in the message.
+        - `cluster_id`: ID of the cluster this message is sent under.
+        - `sender_id`: ID of the sender of this message.
+        """
         self.msg_type = msg_type
         self.data_length = len(data)
         self.data = data
@@ -61,7 +70,9 @@ class CTPMessage:
     @classmethod
     def unpack_header(cls, packet_header: bytes) -> Dict[str, Any]:
         """
-        Unpacks only the packet headers.
+        Unpacks the given bytes as a packet header.
+        Returns a Dictionary mapping each packet header to the actual value.
+        - Raises an `InvalidCTPMessageError` if the header is invalid.
         """
         if len(packet_header) != cls.HEADER_LENGTH:
             raise InvalidCTPMessageError("Packet header does not have exactly 6 bytes.")
@@ -77,7 +88,9 @@ class CTPMessage:
     @classmethod
     def unpack(cls, packet: bytes) -> 'CTPMessage':
         """
-        Unpacks a **full packet**.
+        Unpacks the given `packet`.
+        Returns a `CTPMessage` constructed from the packet.
+        - Raises an `InvalidCTPMessageError` if the packet is invalid.
         """
         if len(packet) < cls.HEADER_LENGTH:
             raise InvalidCTPMessageError("Invalid packet")
@@ -117,6 +130,7 @@ class Connection:
     def send_message(self, message: CTPMessage):
         """
         Sends `packet` over the current socket.
+        - Raises a `ConnectionError` if there was an error in the connection.
         """
         packet = message.pack()
 
@@ -136,7 +150,10 @@ class Connection:
         header_b = self._recv(CTPMessage.HEADER_LENGTH)
 
         # Parse, get the length of the data
-        headers = CTPMessage.unpack_header(header_b)
+        try:
+            headers = CTPMessage.unpack_header(header_b)
+        except InvalidCTPMessageError:
+            raise ConnectionError("Invalid message header.")
         expected_data_len = headers['data_length']
 
         # Get the rest of the data.
@@ -211,7 +228,6 @@ class CTPPeer:
         )
 
         # if it's a request, expect a response
-        #TODO: maybe change the CTP Message to be request or response, then put the actual type in the headers?
         self._log("info", f"Sending {msg_type.name} with data {data}.")
         response:CTPMessage = None
         match msg_type:
