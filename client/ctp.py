@@ -78,11 +78,26 @@ class CTPMessage:
             raise InvalidCTPMessageError("Packet header does not have exactly 6 bytes.")
         
         headers = struct.unpack('!HI32s32s', packet_header)
+        # Validate values
+        msg_type = None
+        data_length = headers[1]
+        cluster_id = None
+        sender_id = None
+        try:
+            msg_type = CTPMessageType(headers[0])
+        except ValueError:
+            raise InvalidCTPMessageError("Unknown message type.")
+        try:
+            cluster_id = bytes(headers[2]).decode(cls.ENCODING)
+            sender_id  = bytes(headers[3]).decode(cls.ENCODING)
+        except UnicodeDecodeError:
+            raise InvalidCTPMessageError("Non-ASCII encoding in header")
+
         return {
-            "msg_type": CTPMessageType(headers[0]),
-            "data_length": headers[1],
-            "cluster_id": bytes(headers[2]).decode(cls.ENCODING),
-            "sender_id": bytes(headers[3]).decode(cls.ENCODING)
+            "msg_type": msg_type,
+            "data_length": data_length,
+            "cluster_id": cluster_id,
+            "sender_id": sender_id
         }
 
     @classmethod
@@ -269,12 +284,17 @@ class CTPPeer:
             #TODO: threading
 
             # Receive message on conn_sock
-            client_msg = conn.recv_message()
+            try:
+                client_msg = conn.recv_message()
+            except ConnectionError:
+                self._log("info", f"Client disconnected.")
+                continue
 
             # Respond appropriately
             response:CTPMessage = None
 
             self._log("info", f"Received {client_msg.msg_type.name} with data {client_msg.data}.")
+            #TODO: encapsulate this part in a separate function
             match client_msg.msg_type:
                 #TODO: create class for response? also need to follow data as stated in docs
                 case CTPMessageType.STATUS_REQUEST:
