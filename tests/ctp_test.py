@@ -1,5 +1,5 @@
 import unittest
-from client.CTPMessage import CTPMessage, CTPMessageType
+from client.ctp import CTPMessage, CTPMessageType
 
 class TestPackingAndUnpacking(unittest.TestCase):
     def test_pack_and_unpack(self):
