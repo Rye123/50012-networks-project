@@ -48,6 +48,19 @@ class CTPMessage:
         - `cluster_id`: ID of the cluster this message is sent under.
         - `sender_id`: ID of the sender of this message.
         """
+        if not isinstance(msg_type, CTPMessageType):
+            raise TypeError("Invalid type for msg_type: msg_type is not a CTPMessageType.")
+        if not isinstance(data, bytes):
+            raise TypeError("Invalid type for data: data is not a bytes object.")
+        if not isinstance(cluster_id, str):
+            raise TypeError("Invalid type for cluster_id: cluster_id is not a str.")
+        if not isinstance(sender_id, str):
+            raise TypeError("Invalid type for sender_id: sender_id is not a str.")
+        if len(cluster_id.encode(self.ENCODING)) != 32:
+            raise ValueError(f"cluster_id of invalid length: {len(cluster_id)} != 32")
+        if len(sender_id.encode(self.ENCODING)) != 32:
+            raise ValueError(f"sender_id of invalid length: {len(sender_id)} != 32")
+
         self.msg_type = msg_type
         self.data_length = len(data)
         self.data = data
@@ -87,8 +100,8 @@ class CTPMessage:
         sender_id = None
         try:
             msg_type = CTPMessageType(headers[0])
-        except ValueError:
-            raise InvalidCTPMessageError("Unknown message type.")
+        except (TypeError, ValueError) as e:
+            raise InvalidCTPMessageError(f"Unknown message type: {str(e)}")
         try:
             cluster_id = bytes(headers[2]).decode(cls.ENCODING)
             sender_id  = bytes(headers[3]).decode(cls.ENCODING)
@@ -197,7 +210,11 @@ class Connection:
         self.sock.close()
     
 class CTPPeer:
-    def __init__(self, id:int = None, max_connections: int = 5):
+    def __init__(self, cluster_id:str = PLACEHOLDER_CLUSTER_ID, max_connections: int = 5):
+        if not isinstance(cluster_id, str):
+            raise TypeError("Invalid type for cluster_id: cluster_id is not a str.")
+        if len(cluster_id.encode(self.ENCODING)) != 32:
+            raise ValueError(f"cluster_id of invalid length: {len(cluster_id)} != 32")
         self.connections:List[Connection] = []
         self.id = uuid1().hex
         self.cluster_id = cluster_id
