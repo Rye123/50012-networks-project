@@ -1,21 +1,93 @@
 # Cluster Transfer Protocol
 An application-level protocol for handling block transfers. This should be done over TCP.
 
+## Note
+Due to Python's import rules (and my laziness to understand `setup.py`), to import this code, we need some deep dark magic to allow us to access the package.
+```py
+### DEEP DARK MAGIC TO ALLOW FOR ABSOLUTE IMPORT
+from pathlib import Path
+import sys
+path = str(Path(Path(__file__).parent.absolute()).parent.absolute())
+sys.path.insert(0, path)
+### END OF DEEP DARK MAGIC
+
+from ctp import ...
+```
+
 ## API
-### `CTPPeer(cluster_id:str, max_connections: int = 5)`
+The intent of the API is to abstract away socket handling and byte manipulation in favour of something like Python's HTTP server implementation.
+
+### `CTPPeer(cluster_id: str, handler: Type[RequestHandler] max_connections: int = 5)`
 A single peer using the CTP protocol. A single host could have multiple peers -- this is simply a class encapsulating the `send_message` and `listen` methods.
 - `cluster_id`: A 32-byte string representing the ID of the cluster.
+- `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
 
-#### `peer.send_message(msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int=6969)`
+#### `peer.send_request(msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int=6969)`
 Sends a single `CTPMessage` to the destination. Returns the corresponding response.
-- If the `msg_type` given is a response, the message will not be sent.
+- `msg_type` should be a request. If it is not, a `ValueError` is thrown.
 
-#### `peer.listen(src_ip: str='', max_requests:int=1)`
-A blocking function that listens on `(src_ip, src_port)` for CTP connections.
+#### `peer.listen(src_ip: str='', max_requests: int=1)`
+A function that listens on `(src_ip, src_port)` for CTP connections.
 - Upon receiving a request, it parses it, and constructs an appropriate response.
 
+### `RequestHandler`
+
+An **abstract base class** that abstracts away socket control for handling a given `CTPMessage` and sending a response.
+
+This class has several abstract methods that should be implemented, these provide functionality to handle given requests. We almost always want to respond to the request, since the client's default state is to wait for a response. 
+
+An example implementation is the `DefaultRequestHandler`.
+
+#### `close()`:
+Ends the connection.
+
+#### `send_response(msg_type: CTPMessageType, data: bytes)`: 
+Sends a response.
+- `msg_type`: A `CTPMessageType`. Should be a response, otherwise a `ValueError` is thrown.
+- `data`: The data to be encapsulated in the message.
+
+#### `cleanup()` (**Abstract Method**): 
+Defines the action to be done after the request has been handled.
+Most of the time, we want to end the interaction with a `close()` call.
+
+#### `handle_status_request(request: CTPMessage)`  (**Abstract Method**): 
+Handle a `STATUS_REQUEST`.
+
+#### `handle_notification(request: CTPMessage)`  (**Abstract Method**)
+Handle a `NOTIFICATION`.
+
+#### `handle_block_request(request: CTPMessage)`  (**Abstract Method**): 
+Handle a `BLOCK_REQUEST`.
+
+#### `handle_unknown_request(request: CTPMessage)`  (**Abstract Method**): 
+Handle an unknown message. This will be reached should a new request type be defined.
+
+#### Example Implementation (`DefaultRequestHandler`)
+
+```py
+class DefaultRequestHandler(RequestHandler):
+    """
+    The default request handler, that simply echos the given data.
+    """
+    def handle_status_request(self, request: CTPMessage):
+        self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)
+
+    def handle_notification(self, request: CTPMessage):
+        self.send_response(CTPMessageType.NOTIFICATION_ACK, request.data)
+    
+    def handle_block_request(self, request: CTPMessage):
+        self.send_response(CTPMessageType.BLOCK_RESPONSE, request.data)
+    
+    def handle_unknown_request(self, request: CTPMessage):
+        self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)
+    
+    def cleanup(self):
+        self.close()
+```
 
 ## CTP Message
+The above API abstracts away the handling of socket sending and receiving of the message. For the most part, only processing of the data needs to be implemented for any code that uses `ctp`.
+
 ### Header
 - Message Type (2 bytes):
   - The first bit determines if the message is a **request** (`0`) or a **response** (`1`).
