@@ -1,7 +1,7 @@
 import unittest
 import struct
 from uuid import uuid4
-from client.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
+from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 
 class TestCTPMessage(unittest.TestCase):
     def test_invalid_types_give_error(self):

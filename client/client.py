@@ -1,4 +1,4 @@
-import ctp
+from ctp import ctp
 from typing import List
 import requests # for HTTP interaction with the server
 
