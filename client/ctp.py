@@ -3,9 +3,11 @@ import logging
 from socket import socket, AF_INET, SOCK_STREAM
 from enum import IntEnum
 from typing import List, Tuple, Dict, Any
+from uuid import uuid1, uuid4, UUID
 
 logging.basicConfig(level = logging.DEBUG)
-
+PLACEHOLDER_CLUSTER_ID:str = uuid4().hex
+PLACEHOLDER_SENDER_ID:str = uuid4().hex
 
 class InvalidCTPMessageError(Exception):
     def __init__(self, *args: object) -> None:
@@ -33,9 +35,9 @@ class CTPMessage:
 
     def __init__(self, 
         msg_type: CTPMessageType,
-        data: bytes,
-        cluster_id: str = "placeholder cluster",
-        sender_id: str = "placeholder sender"
+        data: bytes = b'',
+        cluster_id: str = PLACEHOLDER_CLUSTER_ID,
+        sender_id: str = PLACEHOLDER_SENDER_ID
     ):
         """
         Initialise a `CTPMessage`.
@@ -121,7 +123,7 @@ class CTPMessage:
         )
     
     def __repr__(self):
-        return f"{self.msg_type.name}\n\tLength: {self.data_length}\n\tData: {self.data}"
+        return f"{self.msg_type.name}\n\tLength: {self.data_length}\n\tCluster/Sender ID: {self.cluster_id}/{self.sender_id}\n\tData: {self.data}"
 
     def __eq__(self, message: 'CTPMessage') -> bool:
         return (self.msg_type == message.msg_type) and \
@@ -197,9 +199,8 @@ class Connection:
 class CTPPeer:
     def __init__(self, id:int = None, max_connections: int = 5):
         self.connections:List[Connection] = []
-        if id is None:
-            id = 999 #TODO: use uuid or use their actual ID (how?)
-        self.id = id
+        self.id = uuid1().hex
+        self.cluster_id = cluster_id
 
     def _log(self, level: str, message: str):
         """
@@ -239,7 +240,9 @@ class CTPPeer:
         conn = self._connect(dest_ip, dest_port)
         message = CTPMessage(
             msg_type,
-            data
+            data,
+            self.cluster_id,
+            self.id
         )
 
         # if it's a request, expect a response
@@ -300,17 +303,23 @@ class CTPPeer:
                 case CTPMessageType.STATUS_REQUEST:
                     response = CTPMessage(
                         CTPMessageType.STATUS_RESPONSE,
-                        b"" 
+                        b"",
+                        self.cluster_id,
+                        self.id
                     )
                 case CTPMessageType.BLOCK_REQUEST:
                     response = CTPMessage(
                         CTPMessageType.BLOCK_RESPONSE,
-                        b""
+                        b"",
+                        self.cluster_id,
+                        self.id
                     )
                 case CTPMessageType.NOTIFICATION: # for manifest update notifs
                     response = CTPMessage(
                         CTPMessageType.NOTIFICATION_ACK,
-                        b""
+                        b"",
+                        self.cluster_id,
+                        self.id
                     )
                 case _:
                     # Break
