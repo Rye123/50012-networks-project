@@ -1,7 +1,7 @@
 import unittest
 import struct
 from uuid import uuid4
-from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
+from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError, CTPPeer
 
 class TestCTPMessage(unittest.TestCase):
     def test_invalid_types_give_error(self):
@@ -56,3 +56,11 @@ class TestCTPMessage(unittest.TestCase):
         for invalid_packet in invalid_packets:
             self.assertRaises(InvalidCTPMessageError, CTPMessage.unpack_header, invalid_packet)
             self.assertRaises(InvalidCTPMessageError, CTPMessage.unpack, invalid_packet)
+
+class TestCTPPeer(unittest.TestCase):
+    def test_send_request_invalidtype(self):
+        testPeer = CTPPeer()
+        self.assertRaises(ValueError, testPeer.send_request, 'boo', b'', '')
+        self.assertRaises(ValueError, testPeer.send_request, CTPMessageType.STATUS_RESPONSE, b'', '')
+        self.assertRaises(ValueError, testPeer.send_request, CTPMessageType.NOTIFICATION_ACK, b'', '')
+        self.assertRaises(ValueError, testPeer.send_request, CTPMessageType.BLOCK_RESPONSE, b'', '')

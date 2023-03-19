@@ -21,6 +21,13 @@ class CTPMessageType(IntEnum):
     BLOCK_REQUEST    = 0b0100
     BLOCK_RESPONSE   = 0b0101
 
+    def is_request(self) -> bool:
+        """
+        Helper method that returns True if this message type is a request.
+        """
+        # if value is even (i.e. last bit is 0, then it's a request)
+        return (self.value % 2) == 0
+
 class CTPMessage:
     """
     A message in the Cluster Transfer Protocol.
@@ -135,6 +142,12 @@ class CTPMessage:
             sender_id=headers['sender_id']
         )
     
+    def is_request(self) -> bool:
+        """
+        Helper method that returns True if this is a request.
+        """
+        return self.msg_type.is_request()
+
     def __repr__(self):
         return f"{self.msg_type.name}\n\tLength: {self.data_length}\n\tCluster/Sender ID: {self.cluster_id}/{self.sender_id}\n\tData: {self.data}"
 
@@ -213,7 +226,7 @@ class CTPPeer:
     def __init__(self, cluster_id:str = PLACEHOLDER_CLUSTER_ID, max_connections: int = 5):
         if not isinstance(cluster_id, str):
             raise TypeError("Invalid type for cluster_id: cluster_id is not a str.")
-        if len(cluster_id.encode(self.ENCODING)) != 32:
+        if len(cluster_id.encode('ascii')) != 32:
             raise ValueError(f"cluster_id of invalid length: {len(cluster_id)} != 32")
         self.connections:List[Connection] = []
         self.id = uuid1().hex
@@ -253,8 +266,15 @@ class CTPPeer:
         #TODO: Should connection be in another thread?
         return Connection(client_sock)
     
-    def send_message(self, msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int = 6969):
-        conn = self._connect(dest_ip, dest_port) #TODO: connect only if request
+    def send_request(self, msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int = 6969):
+        """
+        Sends a request of type `msg_type` containing data `data` to `(dest_ip, dest_port)`.
+        - Raises a `ValueError` if the given `msg_type` is not a request.
+        """
+        if not isinstance(msg_type, CTPMessageType) or not msg_type.is_request():
+            raise ValueError("Invalid msg_type: msg_type should be a CTPMessageType and a request.")
+        
+        conn = self._connect(dest_ip, dest_port)
         message = CTPMessage(
             msg_type,
             data,
@@ -284,8 +304,9 @@ class CTPPeer:
             self._log("info", f"Received response {response.msg_type.name} with data: {response.data}")
         else:
             self._log("warning", f"Non-request detected, cancelling send operation.")
+        
         # Close connection
-        conn.close() #TODO: this results in a socket connection broken break in server, maybe should check for that on server end
+        conn.close()
         self._log("info", f"Connection closed.")
     
     def listen(self, src_ip: str = '', src_port: int = 6969, max_requests:int = 1):
