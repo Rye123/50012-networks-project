@@ -39,8 +39,9 @@ Depends on message type:
   - Block Data
 
 ## API
-### `CTPPeer(id: int, max_connections: int = 5)`
+### `CTPPeer(cluster_id:str, max_connections: int = 5)`
 A single peer using the CTP protocol.
+- `cluster_id`: A 32-byte string representing the ID of the cluster.
 
 #### `peer.send_message(msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int=6969)`
 Sends a single `CTPMessage` to the destination. Returns the corresponding response.

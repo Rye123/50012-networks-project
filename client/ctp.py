@@ -254,7 +254,7 @@ class CTPPeer:
         return Connection(client_sock)
     
     def send_message(self, msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int = 6969):
-        conn = self._connect(dest_ip, dest_port)
+        conn = self._connect(dest_ip, dest_port) #TODO: connect only if request
         message = CTPMessage(
             msg_type,
             data,
