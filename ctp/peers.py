@@ -5,9 +5,10 @@ from abc import ABC, abstractmethod
 from threading import Thread, Event
 from socket import socket, AF_INET, SOCK_STREAM
 from uuid import uuid1, UUID
-from typing import List, Type, Callable, Any
+from typing import List, Type, Callable, Any, Tuple
 
 #TODO: refactor src_ip, src_port to be an address tuple instead.
+AddressType = Tuple[str, int]
 
 class ListenerThread(Thread):
     """
@@ -32,10 +33,10 @@ class ListenerThread(Thread):
             try:
                 conn_sock, conn_addr = self.sock.accept()
                 self.peer._log("info", f"Received connection from ({conn_addr})")
-                conn = Connection(conn_sock)
+                conn = CTPConnection(conn_sock)
                 client_msg = conn.recv_message()
                 self.peer._handle_request(conn, client_msg)
-            except ConnectionError:
+            except CTPConnectionError:
                 self.peer._log("info", f"Client disconnected.")
                 conn.close() #TODO: test with random messages
                 continue
@@ -64,7 +65,7 @@ class RequestHandler(ABC):
 
     An example implementation is the `DefaultRequestHandler`.
     """
-    def __init__(self, peer: 'CTPPeer', connection: 'Connection'):
+    def __init__(self, peer: 'CTPPeer', connection: 'CTPConnection'):
         self.peer = peer
         self._conn = connection
 
@@ -193,38 +194,67 @@ class DefaultRequestHandler(RequestHandler):
     def cleanup(self):
         self.close()
 
-class Connection:
-    """
-    Defines a CTP connection.
-    """
-    class ConnectionError(Exception):
-        def __init__(self, *args: object) -> None:
-            super().__init__(*args)
+class CTPConnectionError(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
 
+class CTPConnection:
+    """
+    Defines a CTP connection, associated with a TCP socket `sock`.
+    - This encapsulates message sending and reception.
+    """
     def __init__(self, sock: socket, default_timeout: float = 5.0):
         self.sock = sock
         self.timeout = default_timeout
+        self.sock.settimeout(default_timeout)
+    
+    def _handle_connection_error(self, error: ConnectionError):
+        if isinstance(error, BrokenPipeError):
+            raise CTPConnectionError("Could not connect as other peer has closed the connection.")
+        elif isinstance(error, ConnectionAbortedError):
+            raise CTPConnectionError("Connection was aborted by the other end.")
+        elif isinstance(error, ConnectionRefusedError):
+            raise CTPConnectionError("Connection was refused on the other end.")
+        elif isinstance(error, ConnectionResetError):
+            raise CTPConnectionError("Connection was reset by the other end.")
+        elif isinstance(error, ConnectionError):
+            raise CTPConnectionError("Connection error.")
+        else:
+            raise CTPConnectionError("Unhandled connection error")
+
+    def start(self, dest_addr: AddressType):
+        """
+        Initialise this connection by connecting to a destination address `dest_addr`.
+        - This is only used by someone sending a message.
+        """
+        try:
+            self.sock.connect(dest_addr)
+        except Exception as e:
+            self._handle_connection_error(e)
 
     def send_message(self, message: CTPMessage):
         """
         Sends `packet` over the current socket.
-        - Raises a `ConnectionError` if there was an error in the connection.
+        - Raises a `CTPConnectionError` if there was an error in the connection.
         """
         packet = message.pack()
 
         total_bytes_sent = 0
-        while total_bytes_sent < len(packet):
-            bytes_sent = self.sock.send(packet)
-            if bytes_sent == 0:
-                raise ConnectionError("Socket connection broken")
-            total_bytes_sent += bytes_sent
+        try:
+            while total_bytes_sent < len(packet):
+                bytes_sent = self.sock.send(packet)
+                if bytes_sent == 0:
+                    raise CTPConnectionError("Socket connection broken")
+                total_bytes_sent += bytes_sent
+        except Exception as e:
+            self._handle_connection_error(e)
 
     def recv_message(self) -> CTPMessage:
         """
         Receives a full message from the current socket.
 
         Ideally, you would want to handle this using the `.listen()` method, handling requests with a separate `RequestHandler`.
-        - Raises a `ConnectionError` if the given message is invalid.
+        - Raises a `CTPConnectionError` if the given message is invalid.
         """
 
         # Receive len(headers) bytes from the socket.
@@ -234,7 +264,7 @@ class Connection:
         try:
             headers = CTPMessage.unpack_header(header_b)
         except InvalidCTPMessageError:
-            raise ConnectionError("Invalid message header.")
+            raise CTPConnectionError("Invalid message header.")
         expected_data_len = headers['data_length']
 
         # Get the rest of the data.
@@ -250,7 +280,7 @@ class Connection:
         while len(recvd_bytes) < byte_len:
             chunk = self.sock.recv(byte_len - len(recvd_bytes))
             if not chunk or len(chunk) == 0:
-                raise ConnectionError("Socket connection broken in _recv()")
+                raise CTPConnectionError("Socket connection broken in _recv()")
             recvd_bytes += chunk
         return recvd_bytes
 
@@ -316,20 +346,24 @@ class CTPPeer:
                 logging.warning(f"{self.id}: Unknown log level used for the following message:")
                 logging.info(message)
     
-    def _connect(self, dest_ip: str, dest_port: int, default_timeout: float = 5.0) -> Connection:
+    def _connect(self, dest_ip: str, dest_port: int, default_timeout: float = 5.0) -> CTPConnection:
+        """
+        Helper method to connect to the destination socket.
+        Starts the new connection, and returns it.
+
+        - Raises a `CTPConnectionError` if there was a connection issue.
+            - This error contains the cause of the connection issue.
+        """
         client_sock = socket(AF_INET, SOCK_STREAM)
-        client_sock.settimeout(default_timeout) #TODO: determine where to put timeout
-        try:
-            client_sock.connect((dest_ip, dest_port))
-        except TimeoutError:
-            raise ConnectionError("Could not connect due to timeout.")
-        
-        return Connection(client_sock)
+        connection = CTPConnection(client_sock, default_timeout)
+        connection.start((dest_ip, dest_port))
+        return connection
     
     def send_request(self, msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int = 6969):
         """
         Sends a request of type `msg_type` containing data `data` to `(dest_ip, dest_port)`.
         - Raises a `ValueError` if the given `msg_type` is not a request.
+        - Raises a `CTPConnectionError` if there was an error in the connection.
         """
         if not isinstance(msg_type, CTPMessageType) or not msg_type.is_request():
             raise ValueError("Invalid msg_type: msg_type should be a CTPMessageType and a request.")
@@ -368,17 +402,18 @@ class CTPPeer:
         
         # Close connection
         conn.close()
-        self._log("info", f"Connection closed.")
+        self._log("info", f"CTPConnection closed.")
     
     def listen(self, src_ip: str = '', src_port: int = 6969, max_requests:int = 1):
         """
         Listen on `(src_ip, src_port)`.
+        - Raises a `CTPConnectionError` if there was an error in the connection.
         """
         # Listen on another thread
         self._listen_thread = ListenerThread(self, src_ip, src_port, max_requests)
         self._listen_thread.start()
 
-    def _handle_request(self, connection: Connection, request: CTPMessage):
+    def _handle_request(self, connection: CTPConnection, request: CTPMessage):
         """
         Handles a given `request`.
         - Request handling code is handled by the `handler` attribute.
