@@ -1,7 +1,19 @@
 """
 example_peer:
 This demonstrates an example implementation of a peer that \
-pings a hard-coded list of peers 
+pings a hard-coded list of peers.
+
+This hard-coded list is in `example_peer_list.txt`. It is stored \
+as a dictionary, and the peer will send a `STATUS_REQUEST` to every \
+peer in the dictionary every second.
+
+When sent a `STATUS_REQUEST`, the peer will respond with a single \
+`STATUS_RESPONSE`.
+
+# Usage
+`python example_peer.py [index]`
+- `index`: The index of the line to use as peer ID and port for this peer. \
+See the `example_peer_list.txt` for the data.
 """
 
 import traceback
@@ -18,6 +30,11 @@ sys.path.insert(0, path)
 from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType, CTPConnectionError
 
 class PeerInfo:
+    """
+    Class that encapsulates data for each peer.
+
+    This is used to define the other peers for this peer to connect to.
+    """
     def __init__(self, cluster_id: str, peer_id: str, address: Tuple[str, int]):
         self.cluster_id = cluster_id
         self.peer_id = peer_id
@@ -72,18 +89,24 @@ class PeerRequestHandler(RequestHandler):
             data
         )
 
-
 class Peer(CTPPeer):
+    """
+    A simple subclass of `CTPPeer`, that adds context in the form of the peermap. \
+    This isn't strictly necessary (we can just work with a global peermap variable), \
+    but we might want to expand this class to involve other context variables.
+    """
     def __init__(self, peer_info: PeerInfo):
         super().__init__(peer_info.cluster_id, peer_info.peer_id, PeerRequestHandler)
         self.peermap:Dict[str, PeerInfo] = dict()
 
+# Example cluster ID. Not needed for this example, it's just needed since CTPMessage expects a Cluster ID.
 example_cluster_id = "3f80e91dc65311ed93abeddb088b3faa"
 
 if __name__ == "__main__":
+    # Get the line index
     import sys
     if len(sys.argv) != 2:
-        print("Please input the line index of the address to use")
+        print("Please input the line index of the address to use. Do note that this line index shouldn't already be used.")
         sys.exit(1)
     
     peer_list:List[PeerInfo] = []
@@ -113,7 +136,7 @@ if __name__ == "__main__":
     peer = Peer(my_info)
     # map each peer ID to the peerinfo
     for peerinfo in peer_list:
-        peer.peermap[peerinfo.peer_id] = peerinfo #TODO: shift this into Peer fn as bootstrapped peerlist?
+        peer.peermap[peerinfo.peer_id] = peerinfo
 
     # setup listen
     print(my_info.address)
@@ -123,16 +146,18 @@ if __name__ == "__main__":
     input()
 
     # message send loop
-    #TODO for sender: address connectionrefusederror
     try:
         while True:
             peermap_iter = 0
+
+            # This simply loops through the peer list, sending a STATUS_REQUEST to every peer.
             while len(peer.peermap.keys()) > 0:
                 if peermap_iter > len(peer.peermap):
                     peermap_iter = 0
                 dest_peer_id = list(peer.peermap.keys())[peermap_iter]
                 dest_peer_info = peer.peermap.get(dest_peer_id)
                 try:
+                    # Send the STATUS_REQUEST
                     peer.send_request(
                         CTPMessageType.STATUS_REQUEST,
                         b'',
@@ -140,7 +165,8 @@ if __name__ == "__main__":
                         dest_peer_info.address[1]
                     )
                 except CTPConnectionError:
-                    # remove peer from the peer_list
+                    # Error in the connection, probably because the peer has closed connection.
+                    # So we end it, and remove the peer from the peermap.
                     print(f"Peer {dest_peer_info.peer_id} has closed connection.")
                     peer.peermap.pop(dest_peer_id)
                 sleep(1)
