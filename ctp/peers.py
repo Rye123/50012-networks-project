@@ -278,7 +278,7 @@ class CTPPeer:
         if not issubclass(requestHandlerClass, RequestHandler):
             raise TypeError("Invalid type for handler: Expected a subclass of RequestHandler")
         
-        self.id = uuid1().hex
+        self.id = peer_id
         self._listen_thread:ListenerThread = None
         self.cluster_id = cluster_id
         self.requestHandlerClass:Type[RequestHandler] = requestHandlerClass
