@@ -6,7 +6,7 @@ pings a hard-coded list of peers
 
 import traceback
 from time import sleep
-from typing import Type, Tuple, List
+from typing import Type, Tuple, List, Dict
 
 ### DEEP DARK MAGIC TO ALLOW FOR ABSOLUTE IMPORT
 from pathlib import Path
@@ -15,7 +15,7 @@ path = str(Path(Path(__file__).parent.absolute()).parent.absolute())
 sys.path.insert(0, path)
 ### END OF DEEP DARK MAGIC
 
-from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType
+from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType, CTPConnectionError
 
 class PeerInfo:
     def __init__(self, cluster_id: str, peer_id: str, address: Tuple[str, int]):
@@ -76,7 +76,7 @@ class PeerRequestHandler(RequestHandler):
 class Peer(CTPPeer):
     def __init__(self, peer_info: PeerInfo):
         super().__init__(peer_info.cluster_id, peer_info.peer_id, PeerRequestHandler)
-        self.peer_list:List[PeerInfo] = []
+        self.peermap:Dict[str, PeerInfo] = dict()
 
 example_cluster_id = "3f80e91dc65311ed93abeddb088b3faa"
 
@@ -111,7 +111,9 @@ if __name__ == "__main__":
                 peer_list.append(peer_info)
                 
     peer = Peer(my_info)
-    peer.peer_list = peer_list #TODO: shift this into Peer fn as bootstrapped peerlist?
+    # map each peer ID to the peerinfo
+    for peerinfo in peer_list:
+        peer.peermap[peerinfo.peer_id] = peerinfo #TODO: shift this into Peer fn as bootstrapped peerlist?
 
     # setup listen
     print(my_info.address)
@@ -124,19 +126,29 @@ if __name__ == "__main__":
     #TODO for sender: address connectionrefusederror
     try:
         while True:
-            for dest_peer_info in peer.peer_list:
-                print(dest_peer_info.address)
-                peer.send_request(
-                    CTPMessageType.STATUS_REQUEST,
-                    b'',
-                    dest_peer_info.address[0],
-                    dest_peer_info.address[1]
-                )
-            sleep(1)
+            peermap_iter = 0
+            while len(peer.peermap.keys()) > 0:
+                if peermap_iter > len(peer.peermap):
+                    peermap_iter = 0
+                dest_peer_id = list(peer.peermap.keys())[peermap_iter]
+                dest_peer_info = peer.peermap.get(dest_peer_id)
+                try:
+                    peer.send_request(
+                        CTPMessageType.STATUS_REQUEST,
+                        b'',
+                        dest_peer_info.address[0],
+                        dest_peer_info.address[1]
+                    )
+                except CTPConnectionError:
+                    # remove peer from the peer_list
+                    print(f"Peer {dest_peer_info.peer_id} has closed connection.")
+                    peer.peermap.pop(dest_peer_id)
+                sleep(1)
     except KeyboardInterrupt:
         peer.end()
     except Exception as e:
         # End connection SAFELY.
+        peer.peermap.clear()
         print("Ending connection due to Exception: " + str(e))
         peer.end()
         print("\nError Traceback: \n\n---\n")
