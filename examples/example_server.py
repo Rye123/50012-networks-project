@@ -10,19 +10,24 @@ from ctp import RequestHandler, CTPMessage, CTPMessageType, CTPPeer
 
 class EchoRequestHandler(RequestHandler):
     """
-    Example request handler which echos the given request.
+    Example request handler which echos the given request, along with data from the 'server'.
     """
     def handle_status_request(self, request: CTPMessage):
-        self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)
+        # Format the response data to contain the server ID
+        data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
+        self.send_response(CTPMessageType.STATUS_RESPONSE, data)
 
     def handle_notification(self, request: CTPMessage):
-        self.send_response(CTPMessageType.NOTIFICATION_ACK, request.data)
+        data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
+        self.send_response(CTPMessageType.NOTIFICATION_ACK, data)
     
     def handle_block_request(self, request: CTPMessage):
-        self.send_response(CTPMessageType.BLOCK_RESPONSE, request.data)
+        data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
+        self.send_response(CTPMessageType.BLOCK_RESPONSE, data)
     
     def handle_unknown_request(self, request: CTPMessage):
-        self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)
+        data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
+        self.send_response(CTPMessageType.STATUS_RESPONSE, data)
     
     def cleanup(self):
         self.close()
@@ -33,7 +38,10 @@ peer = CTPPeer(example_cluster_id, EchoRequestHandler)
 try:
     peer.listen('localhost')
     while(True): 
-        # loop to keep main thread alive
-        pass
+        # Main Loop
+        command = input().lower()
+        if command == "exit":
+            peer.end()
+            break
 except KeyboardInterrupt:
     peer.end()
