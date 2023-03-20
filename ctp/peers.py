@@ -168,6 +168,7 @@ class DefaultRequestHandler(RequestHandler):
     """
     The default request handler, that simply echos the given data.
     """
+    #TODO: should default just reply "not supported" or something?
     def handle_status_request(self, request: CTPMessage):
         self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)
 
@@ -259,6 +260,12 @@ class CTPPeer:
     """
 
     def __init__(self, cluster_id:str = PLACEHOLDER_CLUSTER_ID, peer_id:str = uuid1().hex, requestHandlerClass: Type[RequestHandler] = DefaultRequestHandler, max_connections: int = 5):
+        """
+        Initialises a CTP peer.
+        - `cluster_id`: The **32-byte** string representing the ID of the cluster to connect to.
+        - `peer_id`: The **32-byte** string representing the ID of the peer to connect to.
+        - `handler`: A **sub-class** of `RequestHandler`, used to handle requests. By default, this will be the `DefaultRequestHandler`.
+        """
         if not isinstance(cluster_id, str):
             raise TypeError("Invalid type for cluster_id: cluster_id is not a str.")
         if not isinstance(peer_id, str):
