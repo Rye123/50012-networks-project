@@ -32,5 +32,7 @@ example_cluster_id = "3f80e91dc65311ed93abeddb088b3faa"
 peer = CTPPeer(example_cluster_id, EchoRequestHandler)
 try:
     peer.listen('localhost')
+    # while(True): # loop to keep main thread alive
+    #     pass
 except KeyboardInterrupt:
     peer.end()

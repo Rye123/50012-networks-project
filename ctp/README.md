@@ -15,26 +15,30 @@ from ctp import ...
 ```
 
 ## API
-The intent of the API is to abstract away socket handling and byte manipulation in favour of something like Python's HTTP server implementation.
+The intent of the API is to abstract away socket handling and byte manipulation in favour of something like Python's HTTP server implementation. For our use case, the API needed to allow for peers to act both as server and client:
+- Peers should be able to send a request.
+- At the same time, peers should be able to listen for incoming requests and handle them. This handling is done with a subclass of the `RequestHandler` abstract base class.
 
 ### `CTPPeer(cluster_id: str, handler: Type[RequestHandler] max_connections: int = 5)`
-A single peer using the CTP protocol. A single host could have multiple peers -- this is simply a class encapsulating the `send_message` and `listen` methods.
+A single peer using the CTP protocol. A single host could have multiple peers -- this is simply a class encapsulating the `send_request` and `listen` methods.
 - `cluster_id`: A 32-byte string representing the ID of the cluster.
 - `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
 
-#### `peer.send_request(msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int=6969)`
+#### `send_request(msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int=6969)`
 Sends a single `CTPMessage` to the destination. Returns the corresponding response.
 - `msg_type` should be a request. If it is not, a `ValueError` is thrown.
 
-#### `peer.listen(src_ip: str='', max_requests: int=1)`
-A function that listens on `(src_ip, src_port)` for CTP connections.
+#### `listen(src_ip: str='', max_requests: int=1)`
+A function that runs a thread that listens on `(src_ip, src_port)` for CTP connections.
 - Upon receiving a request, it parses it, and constructs an appropriate response.
+- Note that this function is **not blocking**. An infinite loop in the main thread is necessary if you want to keep this running, otherwise the end of the main thread will cause problems.
 
 ### `RequestHandler`
 
 An **abstract base class** that abstracts away socket control for handling a given `CTPMessage` and sending a response.
 
 This class has several abstract methods that should be implemented, these provide functionality to handle given requests. We almost always want to respond to the request, since the client's default state is to wait for a response. 
+- The `RequestHandler` always has access to the peer handling the request (i.e. the *server*, in client-server architecture), through the `peer` attribute.
 
 An example implementation is the `DefaultRequestHandler`.
 

@@ -2,27 +2,78 @@ import logging
 from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 from ctp.ctp import PLACEHOLDER_CLUSTER_ID, PLACEHOLDER_SENDER_ID
 from abc import ABC, abstractmethod
-from threading import Thread
+from threading import Thread, Event
 from socket import socket, AF_INET, SOCK_STREAM
 from uuid import uuid1, UUID
-from typing import List, Type
+from typing import List, Type, Callable, Any
 
+class ListenerThread(Thread):
+    """
+    Thread that sets up a listening socket for the given peer.
+    #TODO: generalise?
+    """
+    def __init__(self, peer: 'CTPPeer', src_ip: str, src_port: int, max_requests: int):
+        super().__init__()
+        self.shut_down_check_interval = 1 # how often we check for shutdown
+        self.peer = peer
+        self.src_addr = (src_ip, src_port)
+        self.max_requests = max_requests
+        self.stop_event = Event()
+    
+    def run(self):
+        self.peer._log("info", f"Listening on {self.src_addr} (Max Request: {self.max_requests}).")
+        self.sock = socket(AF_INET, SOCK_STREAM)
+        self.sock.bind(self.src_addr)
+        self.sock.settimeout(self.shut_down_check_interval)
+        self.sock.listen(self.max_requests)
+        while not self.stop_event.is_set():
+            try:
+                conn_sock, conn_addr = self.sock.accept()
+                self.peer._log("info", f"Received connection from ({conn_addr})")
+                conn = Connection(conn_sock)
+                client_msg = conn.recv_message()
+                self.peer._handle_request(conn, client_msg)
+            except ConnectionError:
+                self.peer._log("info", f"Client disconnected.")
+                conn.close() #TODO: test with random messages
+                continue
+            except TimeoutError:
+                pass # check if shutdown signal passed
+        self.sock.close()
+    
+    @staticmethod
+    def stop_thread(thread: 'ListenerThread'):
+        thread.stop_event.set()
 
 class RequestHandler(ABC):
     """
-    Handles a request.
-    This should be subclassed.
+    An abstract base class that abstracts away socket control for \
+        handling a given `CTPMessage` and sending a response.
+
+    This class has several abstract methods that should be \
+        implemented, these provide functionality to handle given requests. We almost always want to respond to the request, since the client's default state is to wait for a response. 
+
+    An example implementation is the `DefaultRequestHandler`.
     """
     def __init__(self, peer: 'CTPPeer', connection: 'Connection'):
-        self._peer = peer
+        self.peer = peer
         self._conn = connection
 
     def handle(self, request: CTPMessage):
         """
-        Handles a request.
+        Handles a request. 
         If necessary, this can be overriden for different logic.
+
+        When a `request` is received by a `CTPPeer`, a `HandlerThread` is \
+        created which runs this method. This method then delegates the \
+        responsibility of handling the request to the following abstract \
+        methods:
+        - `handle_status_request(request)`
+        - `handle_notification(request)`
+        - `handle_block_request(request)`
+        - `handle_unknown_request(request)`.
         """
-        self._peer._log("info", f"Received {request.msg_type.name} with data {request.data}.")
+        self.peer._log("info", f"Received {request.msg_type.name} with data {request.data}.")
         match request.msg_type:
             case CTPMessageType.STATUS_REQUEST:
                 self.handle_status_request(request)
@@ -31,7 +82,6 @@ class RequestHandler(ABC):
             case CTPMessageType.BLOCK_REQUEST:
                 self.handle_block_request(request)
             case _:
-                #TODO: put in separate method?
                 self.handle_unknown_request(request)
         self.cleanup()
     
@@ -39,7 +89,7 @@ class RequestHandler(ABC):
         """
         Ends the connection.
         """
-        self._peer._log("info", "Closing connection.")
+        self.peer._log("info", "Closing connection.")
         self._conn.close()
     
     def send_response(self, msg_type: CTPMessageType, data: bytes):
@@ -54,10 +104,10 @@ class RequestHandler(ABC):
         response = CTPMessage(
             msg_type,
             data,
-            self._peer.cluster_id,
-            self._peer.id
+            self.peer.cluster_id,
+            self.peer.id
         )
-        self._peer._log("info", f"Responded with {response.msg_type.name}.")
+        self.peer._log("info", f"Responded with {response.msg_type.name}.")
         self._conn.send_message(response)
     
     @abstractmethod
@@ -97,10 +147,15 @@ class RequestHandler(ABC):
         """
 
 class HandlerThread(Thread):
+    """
+    Thread that contains the state of a `RequestHandler`.
+    - This allows us to handle a request with a `RequestHandler` in a separate thread.
+    """
     def __init__(self, requestHandler: RequestHandler, request: CTPMessage):
         super().__init__()
         self.requestHandler = requestHandler
         self.request = request
+        #TODO: use event?
     
     def run(self):
         self.requestHandler.handle(self.request)
@@ -206,8 +261,7 @@ class CTPPeer:
             raise TypeError("Invalid type for handler: Expected a subclass of RequestHandler")
         
         self.id = uuid1().hex
-        self._listening = False
-        self._listen_thread = None
+        self._listen_thread:ListenerThread = None
         self.cluster_id = cluster_id
         self.requestHandlerClass:Type[RequestHandler] = requestHandlerClass
         self.requestHandlerThreads:List[HandlerThread] = []
@@ -294,33 +348,8 @@ class CTPPeer:
         Listen on `(src_ip, src_port)`.
         """
         # Listen on another thread
-        self._listening = True
-        self._listen_thread = Thread(target=self._listen, args=[src_ip, src_port, max_requests])
-        self._listen_thread.run()
-
-    def _listen(self, src_ip: str, src_port: int, max_requests: int):
-        """
-        Thread worker function to listen on the given address.
-        """
-        welcome_sock = socket(AF_INET, SOCK_STREAM)
-        welcome_sock.bind((src_ip, src_port))
-        welcome_sock.settimeout(2) # check whether to shut down every 2 seconds
-        welcome_sock.listen(max_requests)
-        self._log("info", f"Listening on ({src_ip}, {src_port}).")
-        while self._listening:
-            try:
-                conn_sock, conn_addr = welcome_sock.accept()
-                self._log("info", f"Received connection from ({conn_addr})")
-                conn = Connection(conn_sock)
-                client_msg = conn.recv_message()
-                self._handle_request(conn, client_msg)
-            except ConnectionError:
-                self._log("info", f"Client disconnected.")
-                conn.close() #TODO: test with random messages
-                continue
-            except TimeoutError:
-                pass # check if shutdown signal passed
-        welcome_sock.close()
+        self._listen_thread = ListenerThread(self, src_ip, src_port, max_requests)
+        self._listen_thread.start()
 
     def _handle_request(self, connection: Connection, request: CTPMessage):
         """
@@ -330,7 +359,7 @@ class CTPPeer:
         handler = self.requestHandlerClass(self, connection)
         handlerThread = HandlerThread(handler, request)
         self.requestHandlerThreads.append(handlerThread)
-        handlerThread.run()
+        handlerThread.start()
         
     def end(self):
         """
@@ -340,4 +369,5 @@ class CTPPeer:
         for requestHandlerThread in self.requestHandlerThreads:
             if requestHandlerThread.is_alive():
                 requestHandlerThread.join()
-        self._listening = False # send signal to end listening socket
+        ListenerThread.stop_thread(self._listen_thread)
+        self._log("info", "End request completed.")
