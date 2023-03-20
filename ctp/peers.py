@@ -251,11 +251,22 @@ class Connection:
         self.sock.close()
 
 class CTPPeer:
-    def __init__(self, cluster_id:str = PLACEHOLDER_CLUSTER_ID, requestHandlerClass: Type[RequestHandler] = DefaultRequestHandler, max_connections: int = 5):
+    """
+    A single peer using the CTP protocol. A single host could have multiple peers -- this is simply a class encapsulating the `send_request` and `listen` methods.
+    - `cluster_id`: A 32-byte string representing the ID of the cluster.
+    - `peer_id`: A 32-byte string representing the ID of the peer. This is used for uniquely identifying this peer within the cluster.
+    - `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
+    """
+
+    def __init__(self, cluster_id:str = PLACEHOLDER_CLUSTER_ID, peer_id:str = uuid1().hex, requestHandlerClass: Type[RequestHandler] = DefaultRequestHandler, max_connections: int = 5):
         if not isinstance(cluster_id, str):
             raise TypeError("Invalid type for cluster_id: cluster_id is not a str.")
+        if not isinstance(peer_id, str):
+            raise TypeError("Invalid type for peer_id: peer_id is not a str.")
         if len(cluster_id.encode('ascii')) != 32:
             raise ValueError(f"cluster_id of invalid length: {len(cluster_id)} != 32")
+        if len(peer_id.encode('ascii')) != 32:
+            raise ValueError(f"peer_id of invalid length: {len(cluster_id)} != 32")
         
         if not issubclass(requestHandlerClass, RequestHandler):
             raise TypeError("Invalid type for handler: Expected a subclass of RequestHandler")
