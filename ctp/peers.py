@@ -7,6 +7,8 @@ from socket import socket, AF_INET, SOCK_STREAM
 from uuid import uuid1, UUID
 from typing import List, Type, Callable, Any
 
+#TODO: refactor src_ip, src_port to be an address tuple instead.
+
 class ListenerThread(Thread):
     """
     Thread that sets up a listening socket for the given peer.
@@ -51,7 +53,14 @@ class RequestHandler(ABC):
         handling a given `CTPMessage` and sending a response.
 
     This class has several abstract methods that should be \
-        implemented, these provide functionality to handle given requests. We almost always want to respond to the request, since the client's default state is to wait for a response. 
+        implemented, these provide functionality to handle given requests. \
+            We almost always want to respond to the request, since the \
+                client's default state is to wait for a response. 
+    - `cleanup()`
+    - `handle_status_request(request)`
+    - `handle_notification(request)`
+    - `handle_block_request(request)`
+    - `handle_unknown_request(request)`.
 
     An example implementation is the `DefaultRequestHandler`.
     """
@@ -273,7 +282,7 @@ class CTPPeer:
         if len(cluster_id.encode('ascii')) != 32:
             raise ValueError(f"cluster_id of invalid length: {len(cluster_id)} != 32")
         if len(peer_id.encode('ascii')) != 32:
-            raise ValueError(f"peer_id of invalid length: {len(cluster_id)} != 32")
+            raise ValueError(f"peer_id of invalid length: {len(peer_id)} != 32")
         
         if not issubclass(requestHandlerClass, RequestHandler):
             raise TypeError("Invalid type for handler: Expected a subclass of RequestHandler")
