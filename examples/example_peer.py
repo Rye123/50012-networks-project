@@ -147,6 +147,8 @@ if __name__ == "__main__":
 
     # message send loop
     try:
+        short_id = my_info.peer_id[:6]
+        messages_sent = 0
         while True:
             peermap_iter = 0
 
@@ -157,10 +159,11 @@ if __name__ == "__main__":
                 dest_peer_id = list(peer.peermap.keys())[peermap_iter]
                 dest_peer_info = peer.peermap.get(dest_peer_id)
                 try:
+                    message = f"{short_id}-{messages_sent}"
                     # Send the STATUS_REQUEST
                     peer.send_request(
                         CTPMessageType.STATUS_REQUEST,
-                        b'',
+                        message.encode('ascii'),
                         dest_peer_info.address[0],
                         dest_peer_info.address[1]
                     )
@@ -169,6 +172,7 @@ if __name__ == "__main__":
                     # So we end it, and remove the peer from the peermap.
                     print(f"Peer {dest_peer_info.peer_id} has closed connection.")
                     peer.peermap.pop(dest_peer_id)
+                messages_sent += 1
                 sleep(1)
     except KeyboardInterrupt:
         peer.end()
