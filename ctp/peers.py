@@ -141,7 +141,6 @@ class CTPConnection:
         Sends `message` over the connection.
         - Raises a `CTPConnectionError` if there was an error in the connection.
         """
-        message.src_port = self.local_addr[1]
         packet = message.pack()
         self.peer._log("debug", f"Sending packet to {self.remote_addr} from {self.local_addr}")
 
