@@ -2,6 +2,8 @@ import unittest
 from ctp.ctp import CTPMessageType
 from ctp.peers import CTPPeer
 
+#TODO: fix tests
+
 class TestCTPPeer(unittest.TestCase):
     def test_invalid_cluster_ids(self):
         invalid_cluster_id_type = b'should not be bytes'

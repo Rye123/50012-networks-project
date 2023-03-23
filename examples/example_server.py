@@ -33,10 +33,16 @@ class EchoRequestHandler(RequestHandler):
         self.close()
 
 example_cluster_id = "3f80e91dc65311ed93abeddb088b3faa"
+src_addr = ('localhost', 6969)
+dest_addr = ('localhost', 7070)
 
-peer = CTPPeer(example_cluster_id, EchoRequestHandler)
+peer = CTPPeer(
+    peer_addr=src_addr,
+    cluster_id=example_cluster_id, 
+    requestHandlerClass=EchoRequestHandler
+)
 try:
-    peer.listen('localhost')
+    peer.listen()
     while(True): 
         # Main Loop
         command = input().lower()

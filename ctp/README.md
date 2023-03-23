@@ -1,5 +1,5 @@
 # Cluster Transfer Protocol
-An application-level protocol for handling block transfers. This should be done over TCP.
+An application-level protocol for handling block transfers. This should be done over UDP.
 
 ## Note
 Due to Python's import rules (and my laziness to understand `setup.py`), to import this code, we need some deep dark magic to allow us to access the package.
@@ -93,7 +93,7 @@ class DefaultRequestHandler(RequestHandler):
 The above API abstracts away the handling of socket sending and receiving of the message. For the most part, only processing of the data needs to be implemented for any code that uses `ctp`.
 
 ### Header
-- Message Type (2 bytes):
+- **Message Type (2 bytes)**:
   - The first bit determines if the message is a **request** (`0`) or a **response** (`1`).
   
 | Message Type       | Bit Representation |
@@ -105,11 +105,12 @@ The above API abstracts away the handling of socket sending and receiving of the
 | `BLOCK_REQUEST`    | `0000 0100`        |
 | `BLOCK_RESPONSE`   | `0000 0101`        |
 
-- Data Length (4 bytes): An unsigned integer representing the length of the message body.
-- Cluster ID (32 bytes): A 32-byte value representing the ID of the cluster.
-- Sender ID (32 bytes): A 32-byte value representing the ID of the message sender.
+- **Source Port (4 bytes)**: An **unsigned integer** representing the listening port of the sender.
+- **Cluster ID (32 bytes)**: A 32-byte value representing the ID of the cluster.
+- **Sender ID (32 bytes)**: A 32-byte value representing the ID of the message sender.
 
-Total header length is 70.
+Total header length is 70 bytes.
+- To avoid fragmentation, we use a maximum packet size of **1400 bytes** -- that is, the data must hence be restricted to **1330 bytes**.
 
 ### Data
 Depends on message type:

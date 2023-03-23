@@ -37,11 +37,13 @@ class CTPMessage:
     - data
     """
     HEADER_LENGTH = 70
+    MAX_PACKET_SIZE = 1400
     ENCODING = 'ascii'
 
     def __init__(self, 
         msg_type: CTPMessageType,
         data: bytes = b'',
+        src_port: int = 6969,
         cluster_id: str = PLACEHOLDER_CLUSTER_ID,
         sender_id: str = PLACEHOLDER_SENDER_ID
     ):
@@ -68,7 +70,7 @@ class CTPMessage:
             raise ValueError(f"sender_id of invalid length: {len(sender_id)} != 32")
 
         self.msg_type = msg_type
-        self.data_length = len(data)
+        self.src_port = src_port
         self.data = data
         self.cluster_id = cluster_id
         self.sender_id = sender_id
@@ -80,7 +82,7 @@ class CTPMessage:
         # Assemble packet contents
         packet:bytes = b''
         packet += struct.pack('!H', self.msg_type.value)                      # unsigned short, 2 bytes
-        packet += struct.pack('!I', self.data_length)                         # unsigned int, 4 bytes
+        packet += struct.pack('!I', self.src_port)                         # unsigned int, 4 bytes
         packet += struct.pack('!32s', self.cluster_id.encode(self.ENCODING))
         packet += struct.pack('!32s', self.sender_id.encode(self.ENCODING))
         
@@ -101,7 +103,7 @@ class CTPMessage:
         headers = struct.unpack('!HI32s32s', packet_header)
         # Validate values
         msg_type = None
-        data_length = headers[1]
+        src_port = headers[1]
         cluster_id = None
         sender_id = None
         try:
@@ -116,7 +118,7 @@ class CTPMessage:
 
         return {
             "msg_type": msg_type,
-            "data_length": data_length,
+            "src_port": src_port,
             "cluster_id": cluster_id,
             "sender_id": sender_id
         }
@@ -137,6 +139,7 @@ class CTPMessage:
         return CTPMessage(
             headers['msg_type'],
             data,
+            src_port=headers["src_port"],
             cluster_id=headers['cluster_id'],
             sender_id=headers['sender_id']
         )
@@ -148,11 +151,11 @@ class CTPMessage:
         return self.msg_type.is_request()
 
     def __repr__(self):
-        return f"{self.msg_type.name}\n\tLength: {self.data_length}\n\tCluster/Sender ID: {self.cluster_id}/{self.sender_id}\n\tData: {self.data}"
+        return f"{self.msg_type.name}\n\tSource Port: {self.src_port}\n\tCluster/Sender ID: {self.cluster_id}/{self.sender_id}\n\tData: {self.data}"
 
     def __eq__(self, message: 'CTPMessage') -> bool:
         return (self.msg_type == message.msg_type) and \
             (self.cluster_id == message.cluster_id) and \
             (self.sender_id == message.sender_id) and \
-            (self.data_length == message.data_length) and \
+            (self.src_port == message.src_port) and \
             (self.data == message.data)
