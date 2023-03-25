@@ -31,7 +31,6 @@ class CTPMessage:
     """
     A message in the Cluster Transfer Protocol.
     - msg_type
-    - data_length
     - cluster_id
     - sender_id
     - data
