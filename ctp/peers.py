@@ -175,6 +175,8 @@ class Listener:
                         res_q.put(msg_addr_tup)
                 except InvalidCTPMessageError:
                     pass
+            except ConnectionError as e:
+                pass
             except TimeoutError:
                 pass
             except Exception as e:
@@ -286,6 +288,10 @@ class CTPPeer:
             except InvalidCTPMessageError:
                 self._log("debug", f"Invalid response received, retrying.")
                 fail_reason = "INVALID RESPONSE"
+                pass
+            except ConnectionError as e:
+                self._log("debug", f"Connection error.")
+                fail_reason = "CONNECTION"
                 pass
             except Exception as e:
                 self._log("debug", f"send_request Exception: {str(e)}")
