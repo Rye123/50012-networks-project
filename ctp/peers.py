@@ -3,7 +3,9 @@ from abc import ABC, abstractmethod
 from threading import Thread, Event
 from socket import socket, AF_INET, SOCK_DGRAM # UDP
 from uuid import uuid1, UUID
+from queue import Queue, Empty
 from typing import Any, Type, List, Callable, Tuple
+from time import sleep
 
 from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 from ctp.ctp import PLACEHOLDER_CLUSTER_ID, PLACEHOLDER_SENDER_ID
@@ -14,8 +16,12 @@ ENCODING = 'ascii'
 
 class RequestHandler(ABC):
     """
-    An abstract base class that abstracts away socket control for \
-        handling a given `CTPMessage` and sending a response.
+    An abstract base class that handles a request. When a request is \
+        received, a new request handler instance is created, and handles \
+            the request.
+    - `self.peer`: The peer responsible for handling the request.
+    - `self.client_addr`: The request sender's address
+    - `self.request`: The actual request
 
     This class has several abstract methods that should be \
         implemented, these provide functionality to handle given requests. \
@@ -29,24 +35,13 @@ class RequestHandler(ABC):
 
     An example implementation is the `DefaultRequestHandler`.
     """
-    def __init__(self, peer: 'CTPPeer', connection: 'CTPConnection'):
+    def __init__(self, peer: 'CTPPeer', request: CTPMessage, client_addr: AddressType):
+        """
+        Initialise the RequestHandler with a new request.
+        """
         self.peer = peer
-        self._conn = connection
-
-    def handle(self, request: CTPMessage):
-        """
-        Handles a request. 
-        If necessary, this can be overriden for different logic.
-
-        When a `request` is received by a `CTPPeer`, a `HandlerThread` is \
-        created which runs this method. This method then delegates the \
-        responsibility of handling the request to the following abstract \
-        methods:
-        - `handle_status_request(request)`
-        - `handle_notification(request)`
-        - `handle_block_request(request)`
-        - `handle_unknown_request(request)`.
-        """
+        self.client_addr = client_addr
+        self.request = request
         self.peer._log("info", f"Received {request.msg_type.name} with data {request.data}.")
         match request.msg_type:
             case CTPMessageType.STATUS_REQUEST:
@@ -64,7 +59,6 @@ class RequestHandler(ABC):
         Ends the connection.
         """
         self.peer._log("info", "Closing connection.")
-        self._conn.close()
     
     def send_response(self, msg_type: CTPMessageType, data: bytes):
         """
@@ -81,8 +75,8 @@ class RequestHandler(ABC):
             self.peer.cluster_id,
             self.peer.peer_id
         )
+        self.peer._send_message(response, self.client_addr)
         self.peer._log("info", f"Responded with {response.msg_type.name}.")
-        self._conn.send_message(response)
     
     @abstractmethod
     def cleanup(self):
@@ -120,48 +114,73 @@ class RequestHandler(ABC):
             that isn't handled by the above methods, it will be handled here.
         """
 
-class CTPConnectionError(Exception):
-    def __init__(self, *args: object) -> None:
-        super().__init__(*args)
+class Listener:
+    """
+    Manages the sole listening socket of the peer.
+    """
+    CHECK_FOR_INTERRUPT_INTERVAL = 1 # Time in seconds to listen on socket before checking for an interrupt.
 
-class CTPConnection:
-    """
-    A bidirectional connection over UDP. This is a connection that has already been \
-    established over the Server.
-    - local_addr: Local address, where a CTP service is listening.
-    - remote_addr: Remote address, where a CTP service is listening.
-    """
-    def __init__(self, peer: 'CTPPeer', local_addr: AddressType, remote_addr: AddressType):
-        self.local_addr = local_addr
-        self.remote_addr = remote_addr
+    def __init__(self, peer: 'CTPPeer'):
         self.peer = peer
+        self.sock = self.peer.sock
+        self.sock.settimeout(self.CHECK_FOR_INTERRUPT_INTERVAL)
+        self.handlerClass = self.peer.requestHandlerClass
+        self._responses:Queue[Tuple[CTPMessage, AddressType]] = Queue()
+        self._listen_thread = None
+        self._stop_listening = Event()
+    
+    def listen(self):
+        self._listen_thread = Thread(target=self._listen, args=[self.peer, self._stop_listening, self.handlerClass, self._responses])
+        self._listen_thread.start()
+        self._stop_listening.clear()
+        self.peer._log("info", f"Listening on {self.peer.peer_addr}.")
+    
+    def stop(self):
+        """
+        Stops the listener.
+        """
+        self._stop_listening.set()
+    
+    def get_response(self, expected_addr: AddressType=None, expected_type: CTPMessageType=None, block_time: int=0.5) -> CTPMessage:
+        """
+        Checks the listener for a response. Blocks for `block_time` to allow time for the response to be returned.
+        - Returns the response, or None.
+        TODO: should we check for sender ID?
+        TODO: change to a better method -- maybe a pub-sub method?
+        """
+        sleep(block_time)
+        with self._responses.mutex:
+            for tup in self._responses.queue:
+                response, addr = tup
+                if (expected_addr is None and expected_type == response.msg_type) \
+                    or (expected_addr == addr and expected_type is None) \
+                    or (expected_addr == addr and expected_type == response.msg_type):
+                    self._responses.queue.remove(tup)
+                    return response
         
-    def send_message(self, message: CTPMessage):
-        """
-        Sends `message` over the connection.
-        - Raises a `CTPConnectionError` if there was an error in the connection.
-        """
-        packet = message.pack()
-        self.peer._log("debug", f"Sending packet to {self.remote_addr} from {self.local_addr}")
-
-        self.peer.sock.sendto(packet, self.remote_addr)
-
-    def recv_message(self) -> CTPMessage:
-        """
-        Receives a full message from the listener socket.
-
-        Ideally, you would want to handle this using the `.listen()` method, handling requests with a separate `RequestHandler`.
-        - Raises a `InvalidCTPMessageError` if the given message is invalid.
-        """
-        self.peer._log("debug", "Receiving...")
-        data, addr = self.peer.sock.recvfrom(CTPMessage.MAX_PACKET_SIZE)
-        if addr != self.remote_addr:
-            print("Received message, but not from there")
-            pass
-        return CTPMessage.unpack(data)
-
-    def close(self):
-        pass
+    @staticmethod
+    def _listen(peer: 'CTPPeer', stop_signal: Event, req_h: RequestHandler, res_q: Queue):
+        sock = peer.sock
+        src_addr = peer.peer_addr
+        while not stop_signal.is_set():
+            try:
+                data, addr = sock.recvfrom(CTPMessage.MAX_PACKET_SIZE)
+                try:
+                    msg = CTPMessage.unpack(data)
+                    msg_addr_tup = (msg, addr)
+                    if msg.msg_type.is_request():
+                        # Handle the request with a new request handler
+                        handler:RequestHandler = req_h(peer, msg, addr)
+                    else:
+                        res_q.put(msg_addr_tup)
+                except InvalidCTPMessageError:
+                    pass
+            except TimeoutError:
+                pass
+            except Exception as e:
+                logging.error(f"Listener crashed with exception: {str(e)}")
+                break
+        sock.close()
 
 class CTPPeer:
     """
@@ -191,6 +210,7 @@ class CTPPeer:
         self.requestHandlerClass:Type[RequestHandler] = requestHandlerClass
         self.sock = socket(AF_INET, SOCK_DGRAM)
         self.sock.bind(peer_addr)
+        self.listener = Listener(self)
 
     def _log(self, level: str, message: str):
         """
@@ -215,6 +235,15 @@ class CTPPeer:
                 logging.warning(f"{self.id}: Unknown log level used for the following message:")
                 logging.info(message)
 
+    def _send_message(self, message: CTPMessage, destination_addr: AddressType):
+        """
+        Sends `message` to the desired destination.
+        - This method isn't meant to be used -- use the higher-level `send_request` or `send_response` methods instead.
+        """
+        packet = message.pack()
+        self._log("debug", f"Sending packet to {destination_addr} from {self.peer_addr}")
+        self.sock.sendto(packet, destination_addr)
+
     def send_request(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, default_timeout: float=3.0, retries: int=0) -> CTPMessage:
         """
         Sends a request of type `msg_type` containing data `data` to `(dest_ip, dest_port)`.
@@ -230,13 +259,11 @@ class CTPPeer:
                 raise ValueError("Invalid dest_addr: dest_addr should be a tuple of an IP address and a port.")
 
         #TODO: do this in a separate thread
-        self.sock.settimeout(default_timeout)
 
         message = CTPMessage(msg_type, data, self.cluster_id, self.peer_id)
         
         self._log("info", f"Sending {msg_type.name} with data {data}.")
         
-        connection = CTPConnection(self, self.peer_addr, dest_addr)
         # Keep sending until we get a response/reach max attempts
         attempts = 0
         successful_send = False
@@ -245,8 +272,10 @@ class CTPPeer:
             attempts += 1
             self._log("info", f"Sending attempt {attempts}")
             try:
-                connection.send_message(message)
-                response = connection.recv_message()
+                self._send_message(message, dest_addr)
+                response = self.listener.get_response(dest_addr) #TODO: expected response based on request
+                if response is None:
+                    raise TimeoutError()
                 successful_send = True
                 # Successful response received, break from loop
                 break
@@ -267,7 +296,7 @@ class CTPPeer:
         else:
             if fail_reason == "":
                 fail_reason = "TIMEOUT?"
-            raise CTPConnectionError(f"Failed to send message after attempts {attempts}, reason was: {fail_reason}")
+            raise TimeoutError(f"Failed to send message after attempts {attempts}, reason was: {fail_reason}") #TODO
 
         return response
     
@@ -277,19 +306,7 @@ class CTPPeer:
         - Raises a `ValueError` if `src_addr` is invalid.
         - Raises a `CTPListenError` if there was an error.
         """
-        data, addr = self.sock.recvfrom(CTPMessage.MAX_PACKET_SIZE)
-        
-        #TODO: check if addr is in the peerlist?
-        connection = CTPConnection(self, self.peer_addr, addr)
-        try:
-            request = CTPMessage.unpack(data)
-            handler = self.requestHandlerClass(self, connection)
-            handler.handle(request)
-            self.listen()
-
-        except InvalidCTPMessageError:
-            self._log("info", "received invalid CTP request")
-            pass
+        self.listener.listen()
     
     def end(self):
-        pass
+        self.listener.stop()
