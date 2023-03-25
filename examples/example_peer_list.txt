@@ -1,2 +1,2 @@
-localhost 6969 ddf108d7c6f111ed986ceddb088b3faa
-localhost 6970 e1ad7a67c6f111ed922eeddb088b3faa
+127.0.0.1 6969 ddf108d7c6f111ed986ceddb088b3faa
+127.0.0.1 6970 e1ad7a67c6f111ed922eeddb088b3faa
