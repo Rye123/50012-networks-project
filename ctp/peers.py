@@ -116,7 +116,13 @@ class RequestHandler(ABC):
 
 class Listener:
     """
-    Manages the sole listening socket of the peer.
+    Manages the sole listening socket of the peer.    
+    Any incoming messages are handled by this class, with requests being \
+    redirected to the RequestHandler subclass assigned to the peer, and \
+    responses being added to a threadsafe queue.
+
+    Requests waiting for responses will call the `get_response()` method \
+    to attempt to retrieve a relevant response.
     """
     CHECK_FOR_INTERRUPT_INTERVAL = 1 # Time in seconds to listen on socket before checking for an interrupt.
 
@@ -194,6 +200,10 @@ class CTPPeer:
     def __init__(self, peer_addr: AddressType, cluster_id: str=PLACEHOLDER_CLUSTER_ID, peer_id: str=PLACEHOLDER_SENDER_ID, requestHandlerClass: Type[RequestHandler]=None):
         """
         Initialise a CTP peer.
+        - `peer_addr`: A tuple containing the IP address and the port number of the host to run the CTP service on.
+- `peer_id`: A 32-byte string representing the ID of the peer.
+- `cluster_id`: A 32-byte string representing the ID of the cluster.
+- `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
         """
         cluster_id_b = cluster_id.encode(ENCODING)
         peer_id_b = peer_id.encode(ENCODING)
@@ -246,10 +256,12 @@ class CTPPeer:
         self._log("debug", f"Sending packet to {destination_addr} from {self.peer_addr}")
         self.sock.sendto(packet, destination_addr)
 
-    def send_request(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, default_timeout: float=3.0, retries: int=0) -> CTPMessage:
+    def send_request(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=3.0, retries: int=0) -> CTPMessage:
         """
         Sends a request of type `msg_type` containing data `data` to `(dest_ip, dest_port)`.
         Returns the response received.
+
+        #TODO: fix documentation here.
         - Raises a `ValueError` if the given `msg_type` is not a request, or if `dest_addr` is not a valid address.
         - If there was a timeout or an invalid response, a `CTPSendError` would be raised after `retries` reattempts.
         """

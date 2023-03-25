@@ -19,18 +19,21 @@ The intent of the API is to abstract away socket handling and byte manipulation 
 - Peers should be able to send a request.
 - At the same time, peers should be able to listen for incoming requests and handle them. This handling is done with a subclass of the `RequestHandler` abstract base class.
 
-### `CTPPeer(cluster_id: str, handler: Type[RequestHandler] max_connections: int = 5)`
+### `CTPPeer(peer_addr: AddressType, cluster_id: str, peer_id: str, handler: Type[RequestHandler])`
 A single peer using the CTP protocol. A single host could have multiple peers -- this is simply a class encapsulating the `send_request` and `listen` methods.
+- `peer_addr`: A tuple containing the IP address and the port number of the host to run the CTP service on.
+- `peer_id`: A 32-byte string representing the ID of the peer.
 - `cluster_id`: A 32-byte string representing the ID of the cluster.
 - `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
 
-#### `send_request(msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int=6969)`
-Sends a single `CTPMessage` to the destination. Returns the corresponding response.
-- `msg_type` should be a request. If it is not, a `ValueError` is thrown.
+#### `send_request(msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=3.0, retries: int=0)`
+Sends a single `CTPMessage(msg_type, data)` to the destination `dest_addr`. Returns the corresponding response.
+- `msg_type`: Should be a request. If it is not, a `ValueError` is thrown.
+- If a response is not received, this method will **block** for `timeout` seconds every time it tries to send a request. The number of retransmissions is set by the `retries` parameter.
 
 #### `listen(src_ip: str='', max_requests: int=1)`
 A function that runs a thread that listens on `(src_ip, src_port)` for CTP connections.
-- Upon receiving a request, it parses it, and constructs an appropriate response.
+- Upon receiving a request, it parses it, and constructs an appropriate response. This is handled by the `RequestHandler` subclass provided to the `CTPPeer` constructor.
 - Note that this function is **not blocking**. An infinite loop in the main thread is necessary if you want to keep this running, otherwise the end of the main thread will cause problems.
 
 ### `RequestHandler`
