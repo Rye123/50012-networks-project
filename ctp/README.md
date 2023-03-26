@@ -1,5 +1,5 @@
 # Cluster Transfer Protocol
-An application-level protocol for handling block transfers. This should be done over TCP.
+An application-level protocol for handling block transfers. This should be done over UDP.
 
 ## Note
 Due to Python's import rules (and my laziness to understand `setup.py`), to import this code, we need some deep dark magic to allow us to access the package.
@@ -19,18 +19,22 @@ The intent of the API is to abstract away socket handling and byte manipulation 
 - Peers should be able to send a request.
 - At the same time, peers should be able to listen for incoming requests and handle them. This handling is done with a subclass of the `RequestHandler` abstract base class.
 
-### `CTPPeer(cluster_id: str, handler: Type[RequestHandler] max_connections: int = 5)`
+### `CTPPeer(peer_addr: AddressType, cluster_id: str, peer_id: str, handler: Type[RequestHandler])`
 A single peer using the CTP protocol. A single host could have multiple peers -- this is simply a class encapsulating the `send_request` and `listen` methods.
+- `peer_addr`: A tuple containing the IP address and the port number of the host to run the CTP service on.
+- `peer_id`: A 32-byte string representing the ID of the peer.
 - `cluster_id`: A 32-byte string representing the ID of the cluster.
 - `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
 
-#### `send_request(msg_type: CTPMessageType, data: bytes, dest_ip: str, dest_port: int=6969)`
-Sends a single `CTPMessage` to the destination. Returns the corresponding response.
-- `msg_type` should be a request. If it is not, a `ValueError` is thrown.
+#### `send_request(msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=3.0, retries: int=0)`
+Sends a single `CTPMessage(msg_type, data)` to the destination `dest_addr`. Returns the corresponding response.
+- `msg_type`: Should be a request. If it is not, a `ValueError` is thrown.
+- If a response is not received, this method will **block** for `timeout` seconds every time it tries to send a request. The number of retransmissions is set by the `retries` parameter.
+  - A `CTPConnectionError` is raised if no response was received after `retries + 1` requests are sent.
 
 #### `listen(src_ip: str='', max_requests: int=1)`
 A function that runs a thread that listens on `(src_ip, src_port)` for CTP connections.
-- Upon receiving a request, it parses it, and constructs an appropriate response.
+- Upon receiving a request, it parses it, and constructs an appropriate response. This is handled by the `RequestHandler` subclass provided to the `CTPPeer` constructor.
 - Note that this function is **not blocking**. An infinite loop in the main thread is necessary if you want to keep this running, otherwise the end of the main thread will cause problems.
 
 ### `RequestHandler`
@@ -63,6 +67,9 @@ Handle a `NOTIFICATION`.
 #### `handle_block_request(request: CTPMessage)`  (**Abstract Method**): 
 Handle a `BLOCK_REQUEST`.
 
+#### `handle_no_op(request: CTPMessage)` (**Abstract Method**):
+Handle a `NO_OP`. This should not send a response, as the sender would not expect one.
+
 #### `handle_unknown_request(request: CTPMessage)`  (**Abstract Method**): 
 Handle an unknown message. This will be reached should a new request type be defined.
 
@@ -82,6 +89,9 @@ class DefaultRequestHandler(RequestHandler):
     def handle_block_request(self, request: CTPMessage):
         self.send_response(CTPMessageType.BLOCK_RESPONSE, request.data)
     
+    def handle_no_op(self, request: CTPMessage):
+        pass
+    
     def handle_unknown_request(self, request: CTPMessage):
         self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)
     
@@ -93,8 +103,9 @@ class DefaultRequestHandler(RequestHandler):
 The above API abstracts away the handling of socket sending and receiving of the message. For the most part, only processing of the data needs to be implemented for any code that uses `ctp`.
 
 ### Header
-- Message Type (2 bytes):
+- **Message Type (1 byte)**:
   - The first bit determines if the message is a **request** (`0`) or a **response** (`1`).
+  - Note that for `NO_OP`, no response is expected. This is intended to be a data-less packet used for liveness checks with the server. By convention, we leave the first bit as `0`.
   
 | Message Type       | Bit Representation |
 | ------------------ | ------------------ |
@@ -104,12 +115,13 @@ The above API abstracts away the handling of socket sending and receiving of the
 | `NOTIFICATION_ACK` | `0000 0011`        |
 | `BLOCK_REQUEST`    | `0000 0100`        |
 | `BLOCK_RESPONSE`   | `0000 0101`        |
+| `NO_OP`            | `1111 1110`        |
 
-- Data Length (4 bytes): An unsigned integer representing the length of the message body.
-- Cluster ID (32 bytes): A 32-byte value representing the ID of the cluster.
-- Sender ID (32 bytes): A 32-byte value representing the ID of the message sender.
+- **Cluster ID (32 bytes)**: A 32-byte value representing the ID of the cluster.
+- **Sender ID (32 bytes)**: A 32-byte value representing the ID of the message sender.
 
-Total header length is 70.
+Total header length is 65 bytes.
+- To avoid fragmentation, we use a maximum packet size of **1400 bytes** -- that is, the data must hence be restricted to **1335 bytes**.
 
 ### Data
 Depends on message type:

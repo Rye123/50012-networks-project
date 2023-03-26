@@ -13,12 +13,13 @@ class InvalidCTPMessageError(Exception):
         super().__init__(*args)
 
 class CTPMessageType(IntEnum):
-    STATUS_REQUEST   = 0b0000
-    STATUS_RESPONSE  = 0b0001
-    NOTIFICATION     = 0b0010
-    NOTIFICATION_ACK = 0b0011
-    BLOCK_REQUEST    = 0b0100
-    BLOCK_RESPONSE   = 0b0101
+    STATUS_REQUEST   = 0b00000000
+    STATUS_RESPONSE  = 0b00000001
+    NOTIFICATION     = 0b00000010
+    NOTIFICATION_ACK = 0b00000011
+    BLOCK_REQUEST    = 0b00000100
+    BLOCK_RESPONSE   = 0b00000101
+    NO_OP            = 0b11111110
 
     def is_request(self) -> bool:
         """
@@ -31,12 +32,13 @@ class CTPMessage:
     """
     A message in the Cluster Transfer Protocol.
     - msg_type
-    - data_length
     - cluster_id
     - sender_id
     - data
     """
-    HEADER_LENGTH = 70
+    HEADER_LENGTH = 65
+    MAX_PACKET_SIZE = 1400
+    MAX_DATA_LENGTH = MAX_PACKET_SIZE - HEADER_LENGTH
     ENCODING = 'ascii'
 
     def __init__(self, 
@@ -66,9 +68,10 @@ class CTPMessage:
             raise ValueError(f"cluster_id of invalid length: {len(cluster_id)} != 32")
         if len(sender_id.encode(self.ENCODING)) != 32:
             raise ValueError(f"sender_id of invalid length: {len(sender_id)} != 32")
+        if len(data) > self.MAX_DATA_LENGTH:
+            raise ValueError(f"data size {len(data)} larger than {self.MAX_DATA_LENGTH} bytes.")
 
         self.msg_type = msg_type
-        self.data_length = len(data)
         self.data = data
         self.cluster_id = cluster_id
         self.sender_id = sender_id
@@ -79,8 +82,7 @@ class CTPMessage:
         """
         # Assemble packet contents
         packet:bytes = b''
-        packet += struct.pack('!H', self.msg_type.value)                      # unsigned short, 2 bytes
-        packet += struct.pack('!I', self.data_length)                         # unsigned int, 4 bytes
+        packet += struct.pack('!c', self.msg_type.value.to_bytes(1, 'big'))    # char, 1 byte
         packet += struct.pack('!32s', self.cluster_id.encode(self.ENCODING))
         packet += struct.pack('!32s', self.sender_id.encode(self.ENCODING))
         
@@ -98,25 +100,23 @@ class CTPMessage:
         if len(packet_header) != cls.HEADER_LENGTH:
             raise InvalidCTPMessageError("Packet header does not have exactly 6 bytes.")
         
-        headers = struct.unpack('!HI32s32s', packet_header)
+        headers = struct.unpack('!c32s32s', packet_header)
         # Validate values
         msg_type = None
-        data_length = headers[1]
         cluster_id = None
         sender_id = None
         try:
-            msg_type = CTPMessageType(headers[0])
+            msg_type = CTPMessageType(int.from_bytes(headers[0], 'big'))
         except (TypeError, ValueError) as e:
             raise InvalidCTPMessageError(f"Unknown message type: {str(e)}")
         try:
-            cluster_id = bytes(headers[2]).decode(cls.ENCODING)
-            sender_id  = bytes(headers[3]).decode(cls.ENCODING)
+            cluster_id = bytes(headers[1]).decode(cls.ENCODING)
+            sender_id  = bytes(headers[2]).decode(cls.ENCODING)
         except UnicodeDecodeError:
             raise InvalidCTPMessageError("Non-ASCII encoding in header")
 
         return {
             "msg_type": msg_type,
-            "data_length": data_length,
             "cluster_id": cluster_id,
             "sender_id": sender_id
         }
@@ -148,11 +148,10 @@ class CTPMessage:
         return self.msg_type.is_request()
 
     def __repr__(self):
-        return f"{self.msg_type.name}\n\tLength: {self.data_length}\n\tCluster/Sender ID: {self.cluster_id}/{self.sender_id}\n\tData: {self.data}"
+        return f"{self.msg_type.name}\n\tCluster/Sender ID: {self.cluster_id}/{self.sender_id}\n\tData: {self.data}"
 
     def __eq__(self, message: 'CTPMessage') -> bool:
         return (self.msg_type == message.msg_type) and \
             (self.cluster_id == message.cluster_id) and \
             (self.sender_id == message.sender_id) and \
-            (self.data_length == message.data_length) and \
             (self.data == message.data)

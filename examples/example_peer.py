@@ -96,7 +96,12 @@ class Peer(CTPPeer):
     but we might want to expand this class to involve other context variables.
     """
     def __init__(self, peer_info: PeerInfo):
-        super().__init__(peer_info.cluster_id, peer_info.peer_id, PeerRequestHandler)
+        super().__init__(
+            peer_addr=peer_info.address,
+            cluster_id=peer_info.cluster_id,
+            peer_id=peer_info.peer_id,
+            requestHandlerClass=PeerRequestHandler
+        )
         self.peermap:Dict[str, PeerInfo] = dict()
 
 # Example cluster ID. Not needed for this example, it's just needed since CTPMessage expects a Cluster ID.
@@ -139,11 +144,14 @@ if __name__ == "__main__":
         peer.peermap[peerinfo.peer_id] = peerinfo
 
     # setup listen
-    print(my_info.address)
-    peer.listen(my_info.address[0], my_info.address[1])
+    peer.listen()
 
     print("Listener set up. Press ENTER to begin sending.")
-    input()
+    try:
+        input()
+    except KeyboardInterrupt:
+        print("Exited before sending messages.")
+        peer.end()
 
     # message send loop
     try:
@@ -154,7 +162,7 @@ if __name__ == "__main__":
 
             # This simply loops through the peer list, sending a STATUS_REQUEST to every peer.
             while len(peer.peermap.keys()) > 0:
-                if peermap_iter > len(peer.peermap):
+                if peermap_iter >= len(peer.peermap.keys()):
                     peermap_iter = 0
                 dest_peer_id = list(peer.peermap.keys())[peermap_iter]
                 dest_peer_info = peer.peermap.get(dest_peer_id)
@@ -164,22 +172,26 @@ if __name__ == "__main__":
                     peer.send_request(
                         CTPMessageType.STATUS_REQUEST,
                         message.encode('ascii'),
-                        dest_peer_info.address[0],
-                        dest_peer_info.address[1]
+                        dest_peer_info.address,
+                        retries=1
                     )
-                except CTPConnectionError:
+                except CTPConnectionError as e: #TODO: change
                     # Error in the connection, probably because the peer has closed connection.
                     # So we end it, and remove the peer from the peermap.
-                    print(f"Peer {dest_peer_info.peer_id} has closed connection.")
+                    print(f"Peer {dest_peer_info.peer_id} has closed connection. Error was: {str(e)}")
                     peer.peermap.pop(dest_peer_id)
                 messages_sent += 1
+                peermap_iter += 1
                 sleep(1)
     except KeyboardInterrupt:
-        peer.end()
+        print("Keyboard Interrupt detected.")
     except Exception as e:
         # End connection SAFELY.
-        peer.peermap.clear()
         print("Ending connection due to Exception: " + str(e))
-        peer.end()
         print("\nError Traceback: \n\n---\n")
         traceback.print_exc()
+        print("Ending peer...")
+    finally:
+        peer.peermap.clear()
+        peer.end()
+        print("Peer ended.")

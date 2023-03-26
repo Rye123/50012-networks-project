@@ -33,15 +33,24 @@ class EchoRequestHandler(RequestHandler):
         self.close()
 
 example_cluster_id = "3f80e91dc65311ed93abeddb088b3faa"
+src_addr = ('127.0.0.1', 6969)
+dest_addr = ('127.0.0.1', 7070)
 
-peer = CTPPeer(example_cluster_id, EchoRequestHandler)
+peer = CTPPeer(
+    peer_addr=src_addr,
+    cluster_id=example_cluster_id, 
+    requestHandlerClass=EchoRequestHandler
+)
 try:
-    peer.listen('localhost')
+    peer.listen()
     while(True): 
         # Main Loop
         command = input().lower()
         if command == "exit":
-            peer.end()
+            print("Exit command, stopping peer...")
             break
 except KeyboardInterrupt:
+    print("Keyboard Interrupt, stopping peer...")
+finally:
     peer.end()
+    print("Peer ended.")

@@ -37,9 +37,8 @@ class TestCTPMessage(unittest.TestCase):
         msg_type = CTPMessageType.STATUS_REQUEST
         message = CTPMessage(msg_type, data, test_cluster_id, test_sender_id)
         packet = message.pack()
-        expected_packet_b = struct.pack('!HI32s32s',
-                                        msg_type,
-                                        len(data),
+        expected_packet_b = struct.pack('!c32s32s',
+                                        msg_type.value.to_bytes(1, 'big'),
                                         test_cluster_id.encode('ascii'),
                                         test_sender_id.encode('ascii')
                                         ) + data
