@@ -50,6 +50,8 @@ class RequestHandler(ABC):
                 self.handle_notification(request)
             case CTPMessageType.BLOCK_REQUEST:
                 self.handle_block_request(request)
+            case CTPMessageType.NO_OP:
+                self.handle_no_op(request)
             case _:
                 self.handle_unknown_request(request)
         self.cleanup()
@@ -84,6 +86,7 @@ class RequestHandler(ABC):
         Handles the cleanup after a request.
         Most of the time, we want to end the interaction, which can be done with the `.close()` method.
         """
+        pass
     
     @abstractmethod
     def handle_status_request(self, request: CTPMessage):
@@ -91,6 +94,7 @@ class RequestHandler(ABC):
         Handles a `STATUS_REQUEST`.
         This should send an appropriate `STATUS_RESPONSE`, with the `send_response` method.
         """
+        pass
     
     @abstractmethod
     def handle_notification(self, request: CTPMessage):
@@ -98,6 +102,7 @@ class RequestHandler(ABC):
         Handles a `NOTIFICATION`.
         This should send an appropriate `NOTIFICATION_ACK`, with the `send_response` method.
         """
+        pass
 
     @abstractmethod
     def handle_block_request(self, request: CTPMessage):
@@ -105,6 +110,15 @@ class RequestHandler(ABC):
         Handles a `BLOCK_REQUEST`.
         This should send an appropriate `BLOCK_RESPONSE`, with the `send_response` method.
         """
+        pass
+    
+    @abstractmethod
+    def handle_no_op(self, request: CTPMessage):
+        """
+        Handles a `NO_OP`.
+        The request sender will not expect a response.
+        """
+        pass
     
     @abstractmethod
     def handle_unknown_request(self, request: CTPMessage):
@@ -113,6 +127,7 @@ class RequestHandler(ABC):
         We shouldn't be able to reach this point, but if there's a request defined in the future \
             that isn't handled by the above methods, it will be handled here.
         """
+        pass
 
 class CTPConnectionError(Exception):
     """
