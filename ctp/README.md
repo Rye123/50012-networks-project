@@ -97,8 +97,9 @@ class DefaultRequestHandler(RequestHandler):
 The above API abstracts away the handling of socket sending and receiving of the message. For the most part, only processing of the data needs to be implemented for any code that uses `ctp`.
 
 ### Header
-- **Message Type (2 bytes)**:
+- **Message Type (1 byte)**:
   - The first bit determines if the message is a **request** (`0`) or a **response** (`1`).
+  - Note that for `NO_OP`, no response is expected. This is intended to be a data-less packet used for liveness checks with the server. By convention, we leave the first bit as `0`.
   
 | Message Type       | Bit Representation |
 | ------------------ | ------------------ |
@@ -108,13 +109,13 @@ The above API abstracts away the handling of socket sending and receiving of the
 | `NOTIFICATION_ACK` | `0000 0011`        |
 | `BLOCK_REQUEST`    | `0000 0100`        |
 | `BLOCK_RESPONSE`   | `0000 0101`        |
+| `NO_OP`            | `1111 1110`        |
 
-- **Source Port (4 bytes)**: An **unsigned integer** representing the listening port of the sender.
 - **Cluster ID (32 bytes)**: A 32-byte value representing the ID of the cluster.
 - **Sender ID (32 bytes)**: A 32-byte value representing the ID of the message sender.
 
-Total header length is 70 bytes.
-- To avoid fragmentation, we use a maximum packet size of **1400 bytes** -- that is, the data must hence be restricted to **1330 bytes**.
+Total header length is 65 bytes.
+- To avoid fragmentation, we use a maximum packet size of **1400 bytes** -- that is, the data must hence be restricted to **1335 bytes**.
 
 ### Data
 Depends on message type:

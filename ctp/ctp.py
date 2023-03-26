@@ -13,12 +13,13 @@ class InvalidCTPMessageError(Exception):
         super().__init__(*args)
 
 class CTPMessageType(IntEnum):
-    STATUS_REQUEST   = 0b0000
-    STATUS_RESPONSE  = 0b0001
-    NOTIFICATION     = 0b0010
-    NOTIFICATION_ACK = 0b0011
-    BLOCK_REQUEST    = 0b0100
-    BLOCK_RESPONSE   = 0b0101
+    STATUS_REQUEST   = 0b00000000
+    STATUS_RESPONSE  = 0b00000001
+    NOTIFICATION     = 0b00000010
+    NOTIFICATION_ACK = 0b00000011
+    BLOCK_REQUEST    = 0b00000100
+    BLOCK_RESPONSE   = 0b00000101
+    NO_OP            = 0b11111110
 
     def is_request(self) -> bool:
         """
@@ -37,6 +38,7 @@ class CTPMessage:
     """
     HEADER_LENGTH = 65
     MAX_PACKET_SIZE = 1400
+    MAX_DATA_LENGTH = MAX_PACKET_SIZE - HEADER_LENGTH
     ENCODING = 'ascii'
 
     def __init__(self, 
@@ -66,6 +68,8 @@ class CTPMessage:
             raise ValueError(f"cluster_id of invalid length: {len(cluster_id)} != 32")
         if len(sender_id.encode(self.ENCODING)) != 32:
             raise ValueError(f"sender_id of invalid length: {len(sender_id)} != 32")
+        if len(data) > self.MAX_DATA_LENGTH:
+            raise ValueError(f"data size {len(data)} larger than {self.MAX_DATA_LENGTH} bytes.")
 
         self.msg_type = msg_type
         self.data = data
@@ -78,7 +82,7 @@ class CTPMessage:
         """
         # Assemble packet contents
         packet:bytes = b''
-        packet += struct.pack('!c', self.msg_type.value.to_bytes(1, 'big'))                     # char, 1 byte
+        packet += struct.pack('!c', self.msg_type.value.to_bytes(1, 'big'))    # char, 1 byte
         packet += struct.pack('!32s', self.cluster_id.encode(self.ENCODING))
         packet += struct.pack('!32s', self.sender_id.encode(self.ENCODING))
         
