@@ -244,12 +244,15 @@ class CTPPeer:
         - `cluster_id`: A 32-byte string representing the ID of the cluster.
         - `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
         """
-        cluster_id_b = cluster_id.encode(ENCODING)
-        peer_id_b = peer_id.encode(ENCODING)
         if not isinstance(cluster_id, str):
             raise TypeError("Invalid type for cluster_id: cluster_id is not a str.")
         if not isinstance(peer_id, str):
             raise TypeError("Invalid type for peer_id: peer_id is not a str.")
+        if not isinstance(peer_addr, Tuple):
+            if not isinstance(peer_addr[0], str) or not isinstance(peer_addr[1], int):
+                raise TypeError("Invalid peer_addr: peer_addr should be a tuple of an IP address and a port.")
+        cluster_id_b = cluster_id.encode(ENCODING)
+        peer_id_b = peer_id.encode(ENCODING)
         if len(cluster_id_b) != 32:
             raise ValueError(f"cluster_id of invalid length: {len(cluster_id_b)} != 32")
         if len(peer_id_b) != 32:
@@ -304,7 +307,7 @@ class CTPPeer:
         - `data`: The data in bytes. 
             - Raises a `ValueError` if this is larger than the maximum packet size.
         - `dest_addr`: A tuple, with the destination IP address and port.
-            - Raises a `ValueError` if this is an invalid address.
+            - Raises a `TypeError` if this is an invalid address.
         - `timeout`: Sets the number of seconds before timeout for *each request*.
         - `retries`: Sets the number of times to resend the request before raising a `CTPConnectionError`.
 
@@ -314,7 +317,7 @@ class CTPPeer:
             raise ValueError("Invalid msg_type: msg_type should be a CTPMessageType and a request.")
         if not isinstance(dest_addr, Tuple):
             if not isinstance(dest_addr[0], str) or not isinstance(dest_addr[1], int):
-                raise ValueError("Invalid dest_addr: dest_addr should be a tuple of an IP address and a port.")
+                raise TypeError("Invalid dest_addr: dest_addr should be a tuple of an IP address and a port.")
 
         message = CTPMessage(msg_type, data, self.cluster_id, self.peer_id)
         
