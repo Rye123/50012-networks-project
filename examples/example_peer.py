@@ -147,7 +147,11 @@ if __name__ == "__main__":
     peer.listen()
 
     print("Listener set up. Press ENTER to begin sending.")
-    input()
+    try:
+        input()
+    except KeyboardInterrupt:
+        print("Exited before sending messages.")
+        peer.end()
 
     # message send loop
     try:
@@ -158,7 +162,7 @@ if __name__ == "__main__":
 
             # This simply loops through the peer list, sending a STATUS_REQUEST to every peer.
             while len(peer.peermap.keys()) > 0:
-                if peermap_iter > len(peer.peermap):
+                if peermap_iter >= len(peer.peermap.keys()):
                     peermap_iter = 0
                 dest_peer_id = list(peer.peermap.keys())[peermap_iter]
                 dest_peer_info = peer.peermap.get(dest_peer_id)
@@ -177,16 +181,17 @@ if __name__ == "__main__":
                     print(f"Peer {dest_peer_info.peer_id} has closed connection. Error was: {str(e)}")
                     peer.peermap.pop(dest_peer_id)
                 messages_sent += 1
+                peermap_iter += 1
                 sleep(1)
     except KeyboardInterrupt:
         print("Keyboard Interrupt detected.")
     except Exception as e:
         # End connection SAFELY.
-        peer.peermap.clear()
         print("Ending connection due to Exception: " + str(e))
         print("\nError Traceback: \n\n---\n")
         traceback.print_exc()
         print("Ending peer...")
     finally:
+        peer.peermap.clear()
         peer.end()
         print("Peer ended.")
