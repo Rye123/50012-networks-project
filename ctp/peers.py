@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from threading import Thread, Event
+from threading import Thread, Event, Timer
 from socket import socket, AF_INET, SOCK_DGRAM # UDP
 from uuid import uuid1, UUID
 from queue import Queue, Empty
@@ -139,12 +139,13 @@ class Listener:
         self.sock = self.peer.sock
         self.sock.settimeout(self.CHECK_FOR_INTERRUPT_INTERVAL)
         self.handlerClass = self.peer.requestHandlerClass
-        self._responses:Queue[Tuple[CTPMessage, AddressType]] = Queue()
+        self._responses:Queue[Tuple[CTPMessage, AddressType]] = Queue() # queue of responses for request-senders to check
+        self._new_response_arrived = Event() # signal to indicate a new response has arrived
         self._listen_thread = None
         self._stop_listening = Event()
     
     def listen(self):
-        self._listen_thread = Thread(target=self._listen, args=[self.peer, self._stop_listening, self.handlerClass, self._responses])
+        self._listen_thread = Thread(target=self._listen, args=[self.peer, self._stop_listening, self.handlerClass, self._responses, self._new_response_arrived])
         self._listen_thread.start()
         self._stop_listening.clear()
         self.peer._log("info", f"Listening on {self.peer.peer_addr}.")
@@ -155,14 +156,17 @@ class Listener:
         """
         self._stop_listening.set()
     
-    def get_response(self, expected_addr: AddressType=None, expected_type: CTPMessageType=None, block_time: int=0.5) -> CTPMessage:
+    
+    def get_response(self, expected_addr: AddressType=None, expected_type: CTPMessageType=None, block_time: int=1.0) -> CTPMessage:
         """
-        Checks the listener for a response. Blocks for `block_time` to allow time for the response to be returned.
+        Checks the listener for a response. Blocks for at least `block_time` until the response is returned.
         - Returns the response, or None.
         TODO: should we check for sender ID?
-        TODO: change to a better method -- maybe a pub-sub method?
         """
-        sleep(block_time)
+        timeout_signal = Event()
+        timer = Timer(block_time, self._response_timer, args=[timeout_signal])
+
+        # Check if response is already in queue
         with self._responses.mutex:
             for tup in self._responses.queue:
                 response, addr = tup
@@ -171,9 +175,33 @@ class Listener:
                     or (expected_addr == addr and expected_type == response.msg_type):
                     self._responses.queue.remove(tup)
                     return response
+        # Add watch signal to the response_signal
+        timer.start()
+        while not timeout_signal.is_set():
+            # Block until a response arrives or timeout occurs
+            while not (self._new_response_arrived.is_set() or timeout_signal.is_set()):
+                pass
+
+            if not timeout_signal.is_set():
+                # New Response arrived, check
+                with self._responses.mutex:
+                    for tup in self._responses.queue:
+                        response, addr = tup
+                        if (expected_addr is None and expected_type == response.msg_type) \
+                            or (expected_addr == addr and expected_type is None) \
+                            or (expected_addr == addr and expected_type == response.msg_type):
+                            timer.cancel()
+                            self._responses.queue.remove(tup)
+                            return response
+        # Timeout, gg
+        return None
         
     @staticmethod
-    def _listen(peer: 'CTPPeer', stop_signal: Event, req_h: RequestHandler, res_q: Queue):
+    def _response_timer(timeout_signal: Event):
+        timeout_signal.set()
+
+    @staticmethod
+    def _listen(peer: 'CTPPeer', stop_signal: Event, req_h: RequestHandler, res_q: Queue, resp_arrived: Event):
         sock = peer.sock
         src_addr = peer.peer_addr
         while not stop_signal.is_set():
@@ -186,7 +214,10 @@ class Listener:
                         # Handle the request with a new request handler
                         handler:RequestHandler = req_h(peer, msg, addr)
                     else:
+                        resp_arrived.clear()
                         res_q.put(msg_addr_tup)
+                        resp_arrived.set()
+                        
                 except InvalidCTPMessageError:
                     pass
             except ConnectionError as e:
