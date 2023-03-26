@@ -27,7 +27,7 @@ path = str(Path(Path(__file__).parent.absolute()).parent.absolute())
 sys.path.insert(0, path)
 ### END OF DEEP DARK MAGIC
 
-from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType
+from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType, CTPConnectionError
 
 class PeerInfo:
     """
@@ -171,7 +171,7 @@ if __name__ == "__main__":
                         dest_peer_info.address,
                         retries=1
                     )
-                except TimeoutError as e: #TODO: change
+                except CTPConnectionError as e: #TODO: change
                     # Error in the connection, probably because the peer has closed connection.
                     # So we end it, and remove the peer from the peermap.
                     print(f"Peer {dest_peer_info.peer_id} has closed connection. Error was: {str(e)}")

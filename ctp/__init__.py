@@ -2,4 +2,4 @@
 
 from .ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 from .peers import RequestHandler
-from .peers import CTPPeer
+from .peers import CTPPeer, CTPConnectionError

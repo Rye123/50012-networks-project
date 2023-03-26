@@ -114,6 +114,14 @@ class RequestHandler(ABC):
             that isn't handled by the above methods, it will be handled here.
         """
 
+class CTPConnectionError(Exception):
+    """
+    Indicates an error to do with the CTP connection.
+    """
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
 class Listener:
     """
     Manages the sole listening socket of the peer.    
@@ -201,9 +209,9 @@ class CTPPeer:
         """
         Initialise a CTP peer.
         - `peer_addr`: A tuple containing the IP address and the port number of the host to run the CTP service on.
-- `peer_id`: A 32-byte string representing the ID of the peer.
-- `cluster_id`: A 32-byte string representing the ID of the cluster.
-- `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
+        - `peer_id`: A 32-byte string representing the ID of the peer.
+        - `cluster_id`: A 32-byte string representing the ID of the cluster.
+        - `handler`: A subclass of `RequestHandler`, an abstraction to handle requests.
         """
         cluster_id_b = cluster_id.encode(ENCODING)
         peer_id_b = peer_id.encode(ENCODING)
@@ -260,19 +268,14 @@ class CTPPeer:
         """
         Sends a request of type `msg_type` containing data `data` to `(dest_ip, dest_port)`.
         Returns the response received.
-
-        #TODO: fix documentation here.
         - Raises a `ValueError` if the given `msg_type` is not a request, or if `dest_addr` is not a valid address.
-        - If there was a timeout or an invalid response, a `CTPSendError` would be raised after `retries` reattempts.
+        - If there was a timeout or an invalid response, a `CTPConnectionError` would be raised after `retries` reattempts.
         """
         if not isinstance(msg_type, CTPMessageType) or not msg_type.is_request():
             raise ValueError("Invalid msg_type: msg_type should be a CTPMessageType and a request.")
-        #TODO: validation functions
         if not isinstance(dest_addr, Tuple):
             if not isinstance(dest_addr[0], str) or not isinstance(dest_addr[1], int):
                 raise ValueError("Invalid dest_addr: dest_addr should be a tuple of an IP address and a port.")
-
-        #TODO: do this in a separate thread
 
         message = CTPMessage(msg_type, data, self.cluster_id, self.peer_id)
         
@@ -287,8 +290,9 @@ class CTPPeer:
             self._log("info", f"Sending attempt {attempts}")
             try:
                 self._send_message(message, dest_addr)
-                response = self.listener.get_response(dest_addr) #TODO: expected response based on request
+                response = self.listener.get_response(dest_addr,) #TODO: expected response based on request
                 if response is None:
+                    # No response from get_response, message was a timeout.
                     raise TimeoutError()
                 successful_send = True
                 # Successful response received, break from loop
@@ -313,8 +317,8 @@ class CTPPeer:
             self._log("info", f"Message sent, received response after attempts {attempts}: {response.msg_type.name} with data: {response.data}")
         else:
             if fail_reason == "":
-                fail_reason = "TIMEOUT?"
-            raise TimeoutError(f"Failed to send message after attempts {attempts}, reason was: {fail_reason}") #TODO
+                fail_reason = "Unknown error."
+            raise CTPConnectionError(f"Failed to send message after attempts {attempts}, reason was: {fail_reason}")
 
         return response
     

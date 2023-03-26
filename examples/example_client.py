@@ -20,6 +20,9 @@ try:
     peer.send_request(CTPMessageType.STATUS_REQUEST, b'This is a status request', dest_addr, retries=1)
     peer.send_request(CTPMessageType.BLOCK_REQUEST, b'This is a block request', dest_addr)
     peer.send_request(CTPMessageType.NOTIFICATION, b'This is a notification.', dest_addr)
+except CTPConnectionError as e:
+    print(f"Could not send request due to a connection error: {str(e)}")
+    print("Stopping peer...")
 except Exception:
     print_exc()
     print("Exception encountered, stopping peer...")

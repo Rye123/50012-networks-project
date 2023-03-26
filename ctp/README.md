@@ -30,6 +30,7 @@ A single peer using the CTP protocol. A single host could have multiple peers --
 Sends a single `CTPMessage(msg_type, data)` to the destination `dest_addr`. Returns the corresponding response.
 - `msg_type`: Should be a request. If it is not, a `ValueError` is thrown.
 - If a response is not received, this method will **block** for `timeout` seconds every time it tries to send a request. The number of retransmissions is set by the `retries` parameter.
+  - A `CTPConnectionError` is raised if no response was received after `retries + 1` requests are sent.
 
 #### `listen(src_ip: str='', max_requests: int=1)`
 A function that runs a thread that listens on `(src_ip, src_port)` for CTP connections.
