@@ -67,6 +67,9 @@ Handle a `NOTIFICATION`.
 #### `handle_block_request(request: CTPMessage)`  (**Abstract Method**): 
 Handle a `BLOCK_REQUEST`.
 
+#### `handle_no_op(request: CTPMessage)` (**Abstract Method**):
+Handle a `NO_OP`. This should not send a response, as the sender would not expect one.
+
 #### `handle_unknown_request(request: CTPMessage)`  (**Abstract Method**): 
 Handle an unknown message. This will be reached should a new request type be defined.
 
@@ -85,6 +88,9 @@ class DefaultRequestHandler(RequestHandler):
     
     def handle_block_request(self, request: CTPMessage):
         self.send_response(CTPMessageType.BLOCK_RESPONSE, request.data)
+    
+    def handle_no_op(self, request: CTPMessage):
+        pass
     
     def handle_unknown_request(self, request: CTPMessage):
         self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)

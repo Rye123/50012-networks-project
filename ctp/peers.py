@@ -129,6 +129,28 @@ class RequestHandler(ABC):
         """
         pass
 
+class DefaultRequestHandler(RequestHandler):
+    """
+    The default request handler, that simply echos the given data.
+    """
+    def handle_status_request(self, request: CTPMessage):
+        self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)
+
+    def handle_notification(self, request: CTPMessage):
+        self.send_response(CTPMessageType.NOTIFICATION_ACK, request.data)
+    
+    def handle_block_request(self, request: CTPMessage):
+        self.send_response(CTPMessageType.BLOCK_RESPONSE, request.data)
+    
+    def handle_no_op(self, request: CTPMessage):
+        pass
+    
+    def handle_unknown_request(self, request: CTPMessage):
+        self.send_response(CTPMessageType.STATUS_RESPONSE, request.data)
+    
+    def cleanup(self):
+        self.close()
+
 class CTPConnectionError(Exception):
     """
     Indicates an error to do with the CTP connection.
@@ -251,7 +273,7 @@ class CTPPeer:
     - `peer_id`: 32-byte string representing ID of peer.
     """
 
-    def __init__(self, peer_addr: AddressType, cluster_id: str=PLACEHOLDER_CLUSTER_ID, peer_id: str=PLACEHOLDER_SENDER_ID, requestHandlerClass: Type[RequestHandler]=None):
+    def __init__(self, peer_addr: AddressType, cluster_id: str=PLACEHOLDER_CLUSTER_ID, peer_id: str=PLACEHOLDER_SENDER_ID, requestHandlerClass: Type[RequestHandler]=DefaultRequestHandler):
         """
         Initialise a CTP peer.
         - `peer_addr`: A tuple containing the IP address and the port number of the host to run the CTP service on.
