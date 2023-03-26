@@ -264,12 +264,20 @@ class CTPPeer:
         self._log("debug", f"Sending packet to {destination_addr} from {self.peer_addr}")
         self.sock.sendto(packet, destination_addr)
 
-    def send_request(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=3.0, retries: int=0) -> CTPMessage:
+    def send_request(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=1.0, retries: int=0) -> CTPMessage:
         """
-        Sends a request of type `msg_type` containing data `data` to `(dest_ip, dest_port)`.
-        Returns the response received.
-        - Raises a `ValueError` if the given `msg_type` is not a request, or if `dest_addr` is not a valid address.
-        - If there was a timeout or an invalid response, a `CTPConnectionError` would be raised after `retries` reattempts.
+        Sends a request of type `msg_type` containing data `data` to `(dest_ip, dest_port)`. Returns the response received.
+        - `msg_type`: The type of `CTPMessage` to be sent.
+            - If `msg_type` is `NO_OP`, no response is expected, and this will return `None`.
+            - Raises a `ValueError` if this is not a request.
+        - `data`: The data in bytes. 
+            - Raises a `ValueError` if this is larger than the maximum packet size.
+        - `dest_addr`: A tuple, with the destination IP address and port.
+            - Raises a `ValueError` if this is an invalid address.
+        - `timeout`: Sets the number of seconds before timeout for *each request*.
+        - `retries`: Sets the number of times to resend the request before raising a `CTPConnectionError`.
+
+        If there was a timeout or an invalid response, a `CTPConnectionError` would be raised after `retries` reattempts.
         """
         if not isinstance(msg_type, CTPMessageType) or not msg_type.is_request():
             raise ValueError("Invalid msg_type: msg_type should be a CTPMessageType and a request.")
@@ -290,7 +298,24 @@ class CTPPeer:
             self._log("info", f"Sending attempt {attempts}")
             try:
                 self._send_message(message, dest_addr)
-                response = self.listener.get_response(dest_addr,) #TODO: expected response based on request
+                response = None
+                expected_response_type = None
+                match message.msg_type:
+                    case CTPMessageType.STATUS_REQUEST:
+                        expected_response_type = CTPMessageType.STATUS_RESPONSE
+                    case CTPMessageType.NOTIFICATION:
+                        expected_response_type = CTPMessageType.NOTIFICATION_ACK
+                    case CTPMessageType.BLOCK_REQUEST:
+                        expected_response_type = CTPMessageType.BLOCK_RESPONSE
+                if expected_response_type is None:
+                    # Return none if msg_type doesn't match any, i.e. no response expected
+                    return None
+                
+                response = self.listener.get_response(
+                    expected_addr=dest_addr,
+                    expected_type=expected_response_type,
+                    block_time=timeout
+                )
                 if response is None:
                     # No response from get_response, message was a timeout.
                     raise TimeoutError()
