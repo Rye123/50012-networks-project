@@ -68,6 +68,56 @@ class TestFile(unittest.TestCase):
     def setUp(self):
         self._test_dir = TemporaryDirectory()
         self.test_dir:str = self._test_dir.name
+        self.temp_files:List[File] = []
+
+        self.filename = "bee.txt"
+        file = File.from_file(get_test_filepath(self.filename))
+        self.orig_file = file
+
+        # Temp file 1: Empty temp file
+        temp_file_1 = File(file.fileinfo)
+        temp_file_1.__temp_type = "Empty Temp File"
+        self.temp_files.append(temp_file_1)
+
+        # Temp file 2: File with first block missing
+        blocks_2 = deepcopy(file.blocks)
+        blocks_2[0].data = b''
+        blocks_2[0].downloaded = False
+        temp_file_2 = File(file.fileinfo)
+        temp_file_2.__temp_type = "File with first block missing"
+        temp_file_2.blocks = blocks_2
+        self.temp_files.append(temp_file_2)
+
+        # Temp file 3: File with last block missing
+        blocks_3 = deepcopy(file.blocks)
+        blocks_3[-1].data = b''
+        blocks_3[-1].downloaded = False
+        temp_file_3 = File(file.fileinfo)
+        temp_file_3.__temp_type = "File with last block missing"
+        temp_file_3.blocks = blocks_3
+        self.temp_files.append(temp_file_3)
+
+        # Temp file 4: File with arbitrary block missing
+        blocks_4 = deepcopy(file.blocks)
+        chosen_index = randint(0, len(blocks_4)-1)
+        blocks_4[chosen_index].data = b''
+        blocks_4[chosen_index].downloaded = False
+        temp_file_4 = File(file.fileinfo)
+        temp_file_4.__temp_type = "File with arbitrary block missing"
+        temp_file_4.blocks = blocks_4
+        self.temp_files.append(temp_file_4)
+
+        # Temp file 5: File with random number of arbitrary blocks missing
+        blocks_5 = deepcopy(file.blocks)
+        number_of_missing_blocks = randint(1, len(blocks_5)-1)
+        for i in range(number_of_missing_blocks):
+            chosen_index = randint(0, len(blocks_5)-1)
+            blocks_5[chosen_index].data = b''
+            blocks_5[chosen_index].downloaded = False
+        temp_file_5 = File(file.fileinfo)
+        temp_file_5.__temp_type = "File with random number of arbitrary blocks missing"
+        temp_file_5.blocks = blocks_5
+        self.temp_files.append(temp_file_5)
 
 
     def test_file_info_preserved_from_file(self):
@@ -105,6 +155,24 @@ class TestFile(unittest.TestCase):
         self.assertEqual(fileinfo1.timestamp, fileinfo2.timestamp)
         self.assertEqual(fileinfo1.filesize, fileinfo2.filesize)
         self.assertEqual(fileinfo1.block_count, fileinfo2.block_count)
+    
+    def test_file_info_preserved_from_temp(self):
+        for temp_file in self.temp_files:
+            temp_file.save_temp_file(self.test_dir)
+            file = File.from_temp_file(f"{self.test_dir}/{self.filename}.crtemp")
+
+            self.assertTrue(file.fileinfo.strictly_equal(self.orig_file.fileinfo), f"FileInfo does not match for {temp_file.__temp_type}")
+
+    def test_save_temp_file_and_load(self):
+        for temp_file in self.temp_files:
+            temp_file.save_temp_file(self.test_dir)
+            file = File.from_temp_file(f"{self.test_dir}/{self.filename}.crtemp")
+
+            # Verify blocks
+            for b1, b2 in zip(temp_file.blocks, file.blocks):
+                self.assertEqual(b1.block_id, b2.block_id, f"{b1.block_id} != {b2.block_id} for {temp_file.__temp_type}.")
+
+    #TODO: tests for invalid temp files.
     
     def tearDown(self):
         self._test_dir.cleanup()
