@@ -8,8 +8,6 @@ from math import ceil
 import logging
 
 FILENAME_MAX_LENGTH = 255
-TEMP_FILE_EXT = 'crtemp'
-TEMP_FILE_SIG = 'CRTEMP'
 MAX_BLOCK_SIZE = CTPMessage.MAX_DATA_LENGTH
 DEFAULT_SHARED_DIR = './shared'
 
@@ -99,7 +97,7 @@ class FileInfo:
             raise ValueError("from_crinfo: Invalid CRINFO file (Invalid extension)")
         pathobj = Path(filename)
         if not pathobj.is_file():
-            raise ValueError("from_crinfo: Invalid CRINFO file (Not a file)")
+            raise FileNotFoundError("from_crinfo: Invalid CRINFO file (Not a file)")
         with pathobj.open('rb') as f:
             data_split = f.read().split(b'\r\n')
             if len(data_split) != 2:
@@ -143,3 +141,97 @@ class FileInfo:
                 data=f.read()
             )
         return fileinfo
+
+class Block:
+    """
+    Associated with a filehash and a block ID. 
+    
+    The filehash matches this block to the appropriate local FileInfo object, the block ID identifies the \
+    index of the block in relation to the local file.
+    """
+
+    def __init__(self, filehash: str, block_id: int, data: bytes=b''):
+        self.filehash = filehash
+        self.block_id = block_id
+        self.downloaded = not (len(data) == 0)
+        self.data = data
+
+class FileError(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+class File:
+    """
+    Associated with a **local** file -- could be fully or partially downloaded.
+    - `fileinfo`: `FileInfo` associated with the file. Uniquely identifies the file.
+    - `path`: Path of the file.
+    - `blocks`
+    """
+    TEMP_FILE_EXT = 'crtemp'
+
+    def __init__(self, fileinfo: FileInfo):
+        """
+        Initialise an empty File object, associated with `fileinfo`.
+
+        This shouldn't be called directly when loading local files.
+        """
+        self.fileinfo = fileinfo
+        self.blocks:List[Block] = []
+
+        # Initialise blocks list
+        for i in range(self.fileinfo.block_count):
+            self.blocks.append(Block(self.fileinfo.filehash, i))
+
+    @property
+    def downloaded(self) -> bool:
+        """
+        True if this file has been fully downloaded.
+        """
+        for block in self.blocks:
+            if not block.downloaded:
+                return False
+        return True
+
+    def save_file(self, shared_dir: str=DEFAULT_SHARED_DIR):
+        if not self.downloaded:
+            raise FileError("save_file Error: File not fully downloaded.")
+        
+        # Save the fileinfo
+        fileinfo = self.fileinfo
+        crinfo_file = fileinfo.save_crinfo(shared_dir)
+        logging.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
+
+        data = b''.join([block.data for block in self.blocks])
+        path = f"{shared_dir}/{self.fileinfo.filename}"
+        ensure_shared_folder(shared_dir)
+        write_file(path, data)
+        logging.info(f"{self.fileinfo.filename} written to directory.")
+    
+    @staticmethod
+    def from_file(path: str) -> 'File':
+        if path.endswith(File.TEMP_FILE_EXT):
+            raise ValueError("from_file: Invalid file (path is a temp file)")
+        
+        pathobj = Path(path)
+        if not pathobj.is_file():
+            raise ValueError('from_file: Invalid file.')
+        
+        # Get FileInfo header, if not create one.
+        filedir = pathobj.parent
+        
+        fileinfo_filename = f"{filedir}/{FileInfo.CRINFO_DIR_NAME}/{pathobj.name}.{FileInfo.CRINFO_EXT}"
+        fileinfo = None
+        try:
+            fileinfo = FileInfo.from_crinfo(fileinfo_filename)
+        except FileNotFoundError:
+            fileinfo = FileInfo.from_file(path)
+
+        file = File(fileinfo)
+
+        # Populate blocks
+        with pathobj.open('rb') as f:
+            for i in range(fileinfo.block_count):
+                file.blocks[i].data = f.read(MAX_BLOCK_SIZE)
+                file.blocks[i].downloaded = True
+        
+        return file
