@@ -193,6 +193,13 @@ class File:
         return True
 
     def save_file(self, shared_dir: str=DEFAULT_SHARED_DIR) -> str:
+        """
+        Saves this file to `shared_dir`. Returns the path of the file.
+        - This will automatically save the corresponding `FileInfo` in `shared_dir/crinfo`.
+        - Default for `shared_dir` is the `./shared` directory under project root.
+        - Raises a `FileError` if the file is not fully downloaded.
+        """
+
         if not self.downloaded:
             raise FileError("save_file Error: File not fully downloaded.")
         
@@ -209,6 +216,14 @@ class File:
         return path
     
     def save_temp_file(self, shared_dir: str=DEFAULT_SHARED_DIR) -> str:
+        """
+        Saves this TEMP file to `shared_dir`. Returns the path of the saved temporary file.
+        - This will automatically save the corresponding `FileInfo` in `shared_dir/crinfo`.
+        - Default for `shared_dir` is the `./shared` directory under project root.
+        - Raises a `FileError` if the file is fully downloaded.
+
+        Refer to `README.md` for the documentation of a temp file.
+        """
         if self.downloaded:
             raise FileError("save_temp_file Error: File already fully downloaded.")
 
@@ -240,6 +255,14 @@ class File:
 
     @staticmethod
     def from_file(path: str) -> 'File':
+        """
+        Load a file from `path`. 
+        - This will automatically load the FileInfo from the `crinfo` directory in the same directory, otherwise a new FileInfo \
+            object is generated. (This is important, as the timestamp will change!)
+        - To get the default shared directory, you may need to import `DEFAULT_SHARED_DIR` from `util.files`.
+        - A `ValueError` is raised if the given path is invalid.
+        """
+
         if path.endswith(File.TEMP_FILE_EXT):
             raise ValueError("from_file: Invalid file (path is a temp file)")
         
@@ -269,6 +292,16 @@ class File:
 
     @staticmethod
     def from_temp_file(path: str) -> 'File':
+        """
+        Load a TEMP file from `path`. 
+        - This will automatically load the FileInfo from the `crinfo` directory in the same directory, otherwise a `FileError` is \
+            raised (Note the difference from `from_file()`.)
+        - To get the default shared directory, you may need to import `DEFAULT_SHARED_DIR` from `util.files`.
+        - A `ValueError` is raised if the given path is invalid.
+
+        Refer to `README.md` for the documentation of a temp file.
+        """
+
         if not path.endswith(File.TEMP_FILE_EXT):
             raise ValueError("from_file: Invalid file (path is not a temp file)")
         
