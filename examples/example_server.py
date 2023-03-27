@@ -25,6 +25,9 @@ class EchoRequestHandler(RequestHandler):
         data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
         self.send_response(CTPMessageType.BLOCK_RESPONSE, data)
     
+    def handle_no_op(self, request: CTPMessage):
+        pass
+    
     def handle_unknown_request(self, request: CTPMessage):
         data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
         self.send_response(CTPMessageType.STATUS_RESPONSE, data)

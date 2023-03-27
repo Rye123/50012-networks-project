@@ -78,6 +78,9 @@ class PeerRequestHandler(RequestHandler):
             CTPMessageType.BLOCK_RESPONSE,
             data
         )
+    
+    def handle_no_op(self, request: CTPMessage):
+        pass
 
     def handle_unknown_request(self, request: CTPMessage):
         """
@@ -178,7 +181,7 @@ if __name__ == "__main__":
                 except CTPConnectionError as e: #TODO: change
                     # Error in the connection, probably because the peer has closed connection.
                     # So we end it, and remove the peer from the peermap.
-                    print(f"Peer {dest_peer_info.peer_id} has closed connection. Error was: {str(e)}")
+                    print(f"Peer {dest_peer_info.peer_id[:6]} has closed connection. \n\tError was: {str(e)}")
                     peer.peermap.pop(dest_peer_id)
                 messages_sent += 1
                 peermap_iter += 1
