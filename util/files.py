@@ -82,26 +82,26 @@ class FileInfo:
         Returns the path to the saved CRINFO file.
         """
         ensure_shared_folder(shared_dir)
-        filename = f"{shared_dir}/{self.CRINFO_DIR_NAME}/{self.filename}.{self.CRINFO_EXT}"
+        path = f"{shared_dir}/{self.CRINFO_DIR_NAME}/{self.filename}.{self.CRINFO_EXT}"
         line_1 = f"CRINFO {self.filesize} {self.timestamp}"
         data = line_1.encode('ascii') + b'\r\n' + self.filehash
-        write_file(filename, data)
-        return filename
+        write_file(path, data)
+        return path
     
     @staticmethod
-    def from_crinfo(filename: str) -> 'FileInfo':
+    def from_crinfo(path: str) -> 'FileInfo':
         """
         Generates a `FileInfo` object from a given CRINFO file name.
         """
-        if not filename.endswith(f".{FileInfo.CRINFO_EXT}"):
-            raise ValueError("from_crinfo: Invalid CRINFO file (Invalid extension)")
-        pathobj = Path(filename)
+        if not path.endswith(f".{FileInfo.CRINFO_EXT}"):
+            raise ValueError(f"from_crinfo: Invalid CRINFO file ({path} has an invalid extension)")
+        pathobj = Path(path)
         if not pathobj.is_file():
-            raise FileNotFoundError("from_crinfo: Invalid CRINFO file (Not a file)")
+            raise FileNotFoundError(f"from_crinfo: Invalid CRINFO file ({path} is not a file):")
         with pathobj.open('rb') as f:
             data_split = f.read().split(b'\r\n')
             if len(data_split) != 2:
-                raise ValueError("from_crinfo: Invalid CRINFO file (Invalid file)")
+                raise ValueError(f"from_crinfo: Invalid CRINFO file ({path} is an invalid file)")
             
             l1_split = data_split[0].decode('ascii').split(' ')
             filehash = data_split[1]
