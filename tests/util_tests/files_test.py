@@ -1,5 +1,5 @@
 import unittest
-from util.fileinfo import *
+from util.files import *
 
 TEST_FILE_DIR_PATH = "./tests/util_tests/test_files"
 

@@ -4,7 +4,8 @@ from pathlib import Path
 
 class FileInfo:
     """
-    Defines 
+    Defines the file information associated with a file.
+    - Uniquely identified by the filehash.
     """
 
     def __init__(self, filehash: bytes, filename: str, filesize: int, last_updated: datetime=None):
@@ -48,5 +49,4 @@ class FileInfo:
                 data=f.read()
             )
         return fileinfo
-
-        
+    

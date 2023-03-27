@@ -1,1 +1,1 @@
-from .fileinfo_test import *
+from .files_test import *
