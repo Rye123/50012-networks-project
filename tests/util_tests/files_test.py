@@ -2,6 +2,8 @@ import unittest
 from tempfile import TemporaryDirectory
 from util.files import *
 from time import sleep
+from copy import deepcopy
+from random import randint
 
 TEST_FILE_DIR_PATH = "./tests/util_tests/test_files"
 
@@ -67,20 +69,20 @@ class TestFile(unittest.TestCase):
         self._test_dir = TemporaryDirectory()
         self.test_dir:str = self._test_dir.name
 
-    def test_file_info_from_file(self):
+
+    def test_file_info_preserved_from_file(self):
         filename = 'huge_text_file.txt'
         file = File.from_file(get_test_filepath(filename))
         
-        file.save_file(self.test_dir)
+        file_loc = file.save_file(self.test_dir)
         fileinfo = FileInfo.from_crinfo(f"{self.test_dir}/crinfo/{filename}.crinfo")
 
         self.assertTrue(file.fileinfo.strictly_equal(fileinfo))
 
-    def test_save_once_load_multiple(self):
+    def test_file_info_preserved_from_multiple_loads(self):
         filename = 'huge_text_file.txt'
         file = File.from_file(get_test_filepath(filename))
         file.save_file(self.test_dir)
-
             
         file1 = File.from_file(f"{self.test_dir}/{filename}")
         file2 = File.from_file(f"{self.test_dir}/{filename}")
