@@ -2,7 +2,6 @@ from hashlib import md5
 from pathlib import Path
 from ctp import CTPMessage
 from util import get_current_timestamp
-from struct import pack, unpack
 from typing import List
 from math import ceil
 import logging
@@ -157,6 +156,10 @@ class Block:
         self.data = data
 
 class FileError(Exception):
+    """
+    Documents an error related to a `File`.
+    """
+
     def __init__(self, *args: object) -> None:
         super().__init__(*args)
 
@@ -165,7 +168,8 @@ class File:
     Associated with a **local** file -- could be fully or partially downloaded.
     - `fileinfo`: `FileInfo` associated with the file. Uniquely identifies the file.
     - `path`: Path of the file.
-    - `blocks`
+    - `blocks`: List of blocks associated with the file.
+    - `downloaded`: Whether or not this file is fully downloaded.
     """
     TEMP_FILE_EXT = 'crtemp'
 
