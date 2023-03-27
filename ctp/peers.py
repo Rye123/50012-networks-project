@@ -42,7 +42,7 @@ class RequestHandler(ABC):
         self.peer = peer
         self.client_addr = client_addr
         self.request = request
-        self.peer._log("info", f"Received {request.msg_type.name} with data {request.data}.")
+        self.peer._log("info", f"Received {request.msg_type.name} from {client_addr}.")
         match request.msg_type:
             case CTPMessageType.STATUS_REQUEST:
                 self.handle_status_request(request)
@@ -78,7 +78,7 @@ class RequestHandler(ABC):
             self.peer.peer_id
         )
         self.peer._send_message(response, self.client_addr)
-        self.peer._log("info", f"Responded with {response.msg_type.name}.")
+        self.peer._log("debug", f"Responded with {response.msg_type.name}.")
     
     @abstractmethod
     def cleanup(self):
@@ -185,14 +185,12 @@ class Listener:
         self._listen_thread = Thread(target=self._listen, args=[self.peer, self._stop_listening, self.handlerClass, self._responses, self._new_response_arrived])
         self._listen_thread.start()
         self._stop_listening.clear()
-        self.peer._log("info", f"Listening on {self.peer.peer_addr}.")
     
     def stop(self):
         """
         Stops the listener.
         """
         self._stop_listening.set()
-    
     
     def get_response(self, expected_addr: AddressType=None, expected_type: CTPMessageType=None, block_time: int=1.0) -> CTPMessage:
         """
@@ -262,7 +260,7 @@ class Listener:
             except TimeoutError:
                 pass
             except Exception as e:
-                logging.error(f"Listener crashed with exception: {str(e)}")
+                logging.critical(f"Listener crashed with exception: {str(e)}")
                 break
         sock.close()
 
@@ -271,6 +269,7 @@ class CTPPeer:
     A single peer using the CTP protocol.
     - `cluster_id`: 32-byte string representing ID of the cluster.
     - `peer_id`: 32-byte string representing ID of peer.
+    - `short_peer_id`: A 6-byte section of the peer_id for debugging purposes.
     """
 
     def __init__(self, peer_addr: AddressType, cluster_id: str=PLACEHOLDER_CLUSTER_ID, peer_id: str=PLACEHOLDER_SENDER_ID, requestHandlerClass: Type[RequestHandler]=DefaultRequestHandler):
@@ -296,6 +295,7 @@ class CTPPeer:
             raise ValueError(f"peer_id of invalid length: {len(peer_id_b)} != 32")
     
         self.peer_id = peer_id
+        self.short_peer_id = peer_id[:6]
         self.cluster_id = cluster_id
         self.peer_addr = peer_addr
         self.requestHandlerClass:Type[RequestHandler] = requestHandlerClass
@@ -308,7 +308,7 @@ class CTPPeer:
         Helper function to log messages regarding this peer.
         """
         level = level.lower()
-        message = f"{self.peer_id}: {message}"
+        message = f"{self.short_peer_id}: {message}" # use short id to shorten logging messages
         #TODO: probably another better way to do this
 
         match level:
@@ -323,7 +323,7 @@ class CTPPeer:
             case "critical":
                 logging.critical(message)
             case _:
-                logging.warning(f"{self.id}: Unknown log level used for the following message:")
+                logging.warning(f"{self.short_peer_id}: Unknown log level used for the following message:")
                 logging.info(message)
 
     def _send_message(self, message: CTPMessage, destination_addr: AddressType):
@@ -332,7 +332,6 @@ class CTPPeer:
         - This method isn't meant to be used -- use the higher-level `send_request` or `send_response` methods instead.
         """
         packet = message.pack()
-        self._log("debug", f"Sending packet to {destination_addr} from {self.peer_addr}")
         self.sock.sendto(packet, destination_addr)
 
     def send_request(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=1.0, retries: int=0) -> CTPMessage:
@@ -358,7 +357,7 @@ class CTPPeer:
 
         message = CTPMessage(msg_type, data, self.cluster_id, self.peer_id)
         
-        self._log("info", f"Sending {msg_type.name} with data {data}.")
+        self._log("info", f"Sending {msg_type.name} to {dest_addr}.")
         
         # Keep sending until we get a response/reach max attempts
         attempts = 0
@@ -366,7 +365,6 @@ class CTPPeer:
         fail_reason = ""
         while attempts <= retries:
             attempts += 1
-            self._log("info", f"Sending attempt {attempts}")
             try:
                 self._send_message(message, dest_addr)
                 response = None
@@ -394,15 +392,15 @@ class CTPPeer:
                 # Successful response received, break from loop
                 break
             except TimeoutError:
-                self._log("debug", f"Attempt {attempts} to send message failed.")
+                self._log("debug", f"send_request: Attempt {attempts} failed: Timeout.")
                 fail_reason = "TIMEOUT"
                 pass
             except InvalidCTPMessageError:
-                self._log("debug", f"Invalid response received, retrying.")
+                self._log("debug", f"send_request: Attempt {attempts} failed: Invalid response.")
                 fail_reason = "INVALID RESPONSE"
                 pass
             except ConnectionError as e:
-                self._log("debug", f"Connection error.")
+                self._log("debug", f"send_request: Attempt {attempts} failed: Connection error.")
                 fail_reason = "CONNECTION"
                 pass
             except Exception as e:
@@ -410,11 +408,11 @@ class CTPPeer:
                 fail_reason = "EXCEPTION"
                 pass
         if successful_send:
-            self._log("info", f"Message sent, received response after attempts {attempts}: {response.msg_type.name} with data: {response.data}")
+            self._log("info", f"send_request: Response received after attempt {attempts}: {response.msg_type.name} from {dest_addr}")
         else:
             if fail_reason == "":
                 fail_reason = "Unknown error."
-            raise CTPConnectionError(f"Failed to send message after attempts {attempts}, reason was: {fail_reason}")
+            raise CTPConnectionError(f"send_request: Failed to send request after attempt {attempts}, reason was: {fail_reason}")
 
         return response
     
@@ -425,6 +423,11 @@ class CTPPeer:
         - Raises a `CTPListenError` if there was an error.
         """
         self.listener.listen()
+        self._log("info", f"Listening on {self.peer_addr}.")
     
     def end(self):
+        """
+        Ends the peer.
+        """
         self.listener.stop()
+        self._log("info", f"Peer stopped.")
