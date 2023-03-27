@@ -17,3 +17,4 @@ sys.path.insert(0, path)
 ### END OF DEEP DARK MAGIC
 
 from ctp_tests import *
+from util_tests import *
