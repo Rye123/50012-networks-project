@@ -189,6 +189,17 @@ class File:
             self.blocks.append(Block(self.fileinfo.filehash, i))
 
     @property
+    def downloaded_blockcount(self) -> int:
+        """
+        The number of downloaded blocks
+        """
+        count = 0
+        for block in self.blocks:
+            if block.downloaded:
+                count += 1
+        return count
+
+    @property
     def downloaded(self) -> bool:
         """
         True if this file has been fully downloaded.
@@ -260,6 +271,9 @@ class File:
         write_file(path, full_data)
         logging.info(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT} written to directory.")
         return path
+
+    def __repr__(self) -> str:
+        return f"{self.fileinfo.filename}: {self.downloaded_blockcount}/{self.fileinfo.block_count} downloaded."
 
     @staticmethod
     def from_file(path: str) -> 'File':
