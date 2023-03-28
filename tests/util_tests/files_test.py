@@ -5,33 +5,32 @@ from time import sleep
 from copy import deepcopy
 from random import randint
 
-TEST_FILE_DIR_PATH = "./tests/util_tests/test_files"
+TEST_FILE_DIR_PATH = Path("./tests/util_tests/test_files")
 
 
-def copy_dir(src_dir: str, tgt_dir: str):
-    for child in Path(src_dir).iterdir():
+def copy_dir(src_dir: Path, tgt_dir: Path):
+    for child in src_dir.iterdir():
+        copy_path = tgt_dir.joinpath(child.name)
         if child.is_file():
             # Open and write
-            copy_path = f"{tgt_dir}/{child.name}"
             with child.open('rb') as f:
                 with Path(copy_path).open('wb') as f2:
                     f2.write(f.read())
         elif child.is_dir():
-            copy_path = f"{tgt_dir}/{child.name}"
             # Make directory
-            copy_dir_pathobj = Path(copy_path).mkdir(exist_ok=True)
-            copy_dir(str(child), copy_path)
+            copy_path.mkdir(exist_ok=True)
+            copy_dir(child, copy_path)
 
 class TestFileInfo(unittest.TestCase):
     def setUp(self):
         self._test_dir = TemporaryDirectory()
-        self.test_dir:str = self._test_dir.name
+        self.test_dir:Path = Path(self._test_dir.name)
 
         # Load test files into test_dir
         copy_dir(TEST_FILE_DIR_PATH, self.test_dir)
     
-    def get_test_filepath(self, filename: str) -> str:
-        return f"{self.test_dir}/{filename}"
+    def get_test_filepath(self, filename: str) -> Path:
+        return self.test_dir.joinpath(filename)
 
     def test_same_data_files_give_same_hash(self):
         fileinfo1 = FileInfo.from_file(self.get_test_filepath('test_same_data_1.txt'))
@@ -71,7 +70,7 @@ class TestFileInfo(unittest.TestCase):
     def test_crinfo_loading(self):
         fileinfo1 = FileInfo.from_file(self.get_test_filepath('huge_text_file.txt'))
         fileinfo1.save_crinfo(self.test_dir)
-        fileinfo2 = FileInfo.from_crinfo(f"{self.test_dir}/crinfo/huge_text_file.txt.crinfo")
+        fileinfo2 = FileInfo.from_crinfo(self.get_test_filepath(f"crinfo/huge_text_file.txt.crinfo"))
 
         self.assertEqual(fileinfo1.filename, fileinfo2.filename)
         self.assertEqual(fileinfo1.filehash, fileinfo2.filehash)
@@ -85,15 +84,15 @@ class TestFileInfo(unittest.TestCase):
 class TestFile(unittest.TestCase):
     def setUp(self):
         self._test_dir = TemporaryDirectory()
-        self.test_dir:str = self._test_dir.name
+        self.test_dir:Path = Path(self._test_dir.name)
         self.temp_files:List[File] = []
 
         # Load test files into test_dir
         copy_dir(TEST_FILE_DIR_PATH, self.test_dir)
         self.generate_test_temp_files()
     
-    def get_test_filepath(self, filename: str) -> str:
-        return f"{self.test_dir}/{filename}"
+    def get_test_filepath(self, filename: str) -> Path:
+        return self.test_dir.joinpath(filename)
 
     def generate_test_temp_files(self):
         self.filename = "bee.txt"
@@ -153,7 +152,7 @@ class TestFile(unittest.TestCase):
         file = File.from_file(self.get_test_filepath(filename))
         
         file_loc = file.save_file()
-        fileinfo = FileInfo.from_crinfo(f"{self.test_dir}/crinfo/{filename}.crinfo")
+        fileinfo = FileInfo.from_crinfo(self.get_test_filepath(f"crinfo/{filename}.crinfo"))
 
         self.assertTrue(file.fileinfo.strictly_equal(fileinfo))
 
@@ -162,9 +161,9 @@ class TestFile(unittest.TestCase):
         file = File.from_file(self.get_test_filepath(filename))
         file.save_file()
             
-        file1 = File.from_file(f"{self.test_dir}/{filename}")
-        file2 = File.from_file(f"{self.test_dir}/{filename}")
-        file3 = File.from_file(f"{self.test_dir}/{filename}")
+        file1 = File.from_file(self.get_test_filepath(filename))
+        file2 = File.from_file(self.get_test_filepath(filename))
+        file3 = File.from_file(self.get_test_filepath(filename))
 
         self.assertTrue(file1.fileinfo.strictly_equal(file2.fileinfo))
         self.assertTrue(file1.fileinfo.strictly_equal(file3.fileinfo))
@@ -174,7 +173,7 @@ class TestFile(unittest.TestCase):
         file = File.from_file(self.get_test_filepath(filename))
 
         file.save_file()
-        file2 = File.from_file(f"{self.test_dir}/{filename}")
+        file2 = File.from_file(self.get_test_filepath(filename))
 
         fileinfo1 = file.fileinfo
         fileinfo2 = file2.fileinfo
