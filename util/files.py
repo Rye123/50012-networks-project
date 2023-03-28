@@ -170,10 +170,11 @@ class File:
     - `path`: Path of the file.
     - `blocks`: List of blocks associated with the file.
     - `downloaded`: Whether or not this file is fully downloaded.
+    - `shared_dir`: The directory that this file, along with its temp file version and fileinfo, should be stored in.
     """
     TEMP_FILE_EXT = 'crtemp'
 
-    def __init__(self, fileinfo: FileInfo):
+    def __init__(self, fileinfo: FileInfo, shared_dir: str=DEFAULT_SHARED_DIR):
         """
         Initialise an empty File object, associated with `fileinfo`.
 
@@ -181,6 +182,7 @@ class File:
         """
         self.fileinfo = fileinfo
         self.blocks:List[Block] = []
+        self.shared_dir = shared_dir
 
         # Initialise blocks list
         for i in range(self.fileinfo.block_count):
@@ -196,13 +198,14 @@ class File:
                 return False
         return True
 
-    def save_file(self, shared_dir: str=DEFAULT_SHARED_DIR) -> str:
+    def save_file(self) -> str:
         """
-        Saves this file to `shared_dir`. Returns the path of the file.
-        - This will automatically save the corresponding `FileInfo` in `shared_dir/crinfo`.
-        - Default for `shared_dir` is the `./shared` directory under project root.
+        Saves this file. Returns the path of the file.
+        - This will automatically save the corresponding `FileInfo` in the shared folder of the file.
         - Raises a `FileError` if the file is not fully downloaded.
         """
+
+        shared_dir = self.shared_dir
 
         if not self.downloaded:
             raise FileError("save_file Error: File not fully downloaded.")
@@ -219,15 +222,16 @@ class File:
         logging.info(f"{self.fileinfo.filename} written to directory.")
         return path
     
-    def save_temp_file(self, shared_dir: str=DEFAULT_SHARED_DIR) -> str:
+    def save_temp_file(self) -> str:
         """
-        Saves this TEMP file to `shared_dir`. Returns the path of the saved temporary file.
-        - This will automatically save the corresponding `FileInfo` in `shared_dir/crinfo`.
-        - Default for `shared_dir` is the `./shared` directory under project root.
+        Saves this TEMP file. Returns the path of the saved temporary file.
+        - This will automatically save the corresponding `FileInfo` in the shared folder of the file.
         - Raises a `FileError` if the file is fully downloaded.
 
         Refer to `README.md` for the documentation of a temp file.
         """
+        shared_dir = self.shared_dir
+
         if self.downloaded:
             raise FileError("save_temp_file Error: File already fully downloaded.")
 
@@ -272,7 +276,7 @@ class File:
         
         pathobj = Path(path)
         if not pathobj.is_file():
-            raise ValueError('from_file: Invalid file.')
+            raise ValueError(f'from_file: Invalid file {pathobj}.')
         
         # Get FileInfo header, if not create one.
         filedir = pathobj.parent
@@ -284,7 +288,7 @@ class File:
         except FileNotFoundError:
             fileinfo = FileInfo.from_file(path)
 
-        file = File(fileinfo)
+        file = File(fileinfo, str(filedir))
 
         # Populate blocks
         with pathobj.open('rb') as f:
@@ -311,7 +315,7 @@ class File:
         
         pathobj = Path(path)
         if not pathobj.is_file():
-            raise ValueError('from_file: Invalid file.')
+            raise ValueError(f'from_file: Invalid file {pathobj}.')
         
         # Get FileInfo header, if not create one.
         filedir = pathobj.parent
@@ -322,9 +326,9 @@ class File:
         try:
             fileinfo = FileInfo.from_crinfo(fileinfo_filename)
         except FileNotFoundError:
-            raise ValueError("from_file: Given temp file has no corresponding CRINFO file.")
+            raise FileError("from_file: Given temp file has no corresponding CRINFO file.")
 
-        file = File(fileinfo)
+        file = File(fileinfo, str(filedir))
 
         # Process file
         file_raw:bytes = b''
