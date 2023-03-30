@@ -257,8 +257,7 @@ class Peer(CTPPeer):
                 logging.debug(f"Detected file with FileInfo: {file_path}")
             except ValueError: # doesn't already exist
                 logging.debug(f"Detected new file: {file_path}")
-                pass
-
+                file.fileinfo.save_crinfo(self.shared_dir)
         # Load temp files
         for tempfile_path in tempfile_paths:
             try:
