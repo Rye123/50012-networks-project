@@ -252,6 +252,17 @@ class File:
                 return False
         return True
 
+    def delete_local_copy(self):
+        """
+        Deletes a local copy of this file (temp or otherwise).
+        Note: The `FileInfo` of this file will still exist!
+        """
+        filepath:Path = self.shared_dir.joinpath(self.fileinfo.filename)
+        tempfilepath:Path = self.shared_dir.joinpath(self.fileinfo.filename + '.' + File.TEMP_FILE_EXT)
+        
+        filepath.unlink(missing_ok=True)
+        tempfilepath.unlink(missing_ok=True)
+
     def save_file(self) -> Path:
         """
         Saves this file. Returns the path of the file.
