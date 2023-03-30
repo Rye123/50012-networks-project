@@ -1,13 +1,14 @@
 from hashlib import md5
 from pathlib import Path
-from ctp import CTPMessage
+from ctp import CTPMessage, CTPMessageType
 from util import get_current_timestamp
 from typing import List
 from math import ceil
 import logging
 
 FILENAME_MAX_LENGTH = 255
-MAX_BLOCK_SIZE = CTPMessage.MAX_DATA_LENGTH
+BLOCK_HEADER_SIZE = 1
+MAX_BLOCK_SIZE = CTPMessage.MAX_DATA_LENGTH - BLOCK_HEADER_SIZE
 DEFAULT_SHARED_DIR = Path('./shared')
 
 def ensure_shared_folder(shared_dir: Path):
@@ -158,11 +159,39 @@ class Block:
     index of the block in relation to the local file.
     """
 
-    def __init__(self, filehash: str, block_id: int, data: bytes=b''):
+    def __init__(self, filehash: bytes, block_id: int, data: bytes=b''):
         self.filehash = filehash
         self.block_id = block_id
         self.downloaded = not (len(data) == 0)
         self.data = data
+
+    def pack(self) -> bytes:
+        """
+        Packs the data into a packet that can then be encapsulated.
+
+        Returns a bytestring:
+        ```
+        {filehash} {block ID}\r\n
+        {data}
+        ```
+        """
+        return self.filehash + b' ' + self.block_id.to_bytes(4) + b'\r\n\r\n' + self.data
+
+    @staticmethod
+    def unpack(packet: bytes) -> 'Block':
+        """
+        Unpacks the data from a deencapsulated bytestring.
+        """
+        header, data = packet.split(b'\r\n\r\n', 1)
+        filehash, block_id_b = header.split(b' ')
+        block_id = int.from_bytes(block_id_b)
+        return Block(filehash, block_id, data)
+
+    def __eq__(self, other: 'Block'):
+        return (self.filehash == other.filehash) and \
+            (self.block_id == other.block_id) and \
+            (self.data == other.data) and \
+            (self.downloaded == other.downloaded)
 
 class FileError(Exception):
     """
