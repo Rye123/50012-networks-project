@@ -134,9 +134,11 @@ Depends on message type:
   - Message
 - `NOTIFICATION_ACK`: Acknowledge a notification
 - `BLOCK_REQUEST`: Request a given block from the destination.
-  - File ID
-  - Block ID
+  ```
+  {filehash}-{block id}
+  ```
 - `BLOCK_RESPONSE`: Respond to a given block request
-  - File ID
-  - Block ID
-  - Block Data
+  ```
+  {filehash}-{block id}-{status}\r\n\r\n
+  {block data (if any)}
+  ```
