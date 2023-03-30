@@ -188,7 +188,7 @@ class Block:
         Unpacks the data from a deencapsulated bytestring.
         """
         header, data = packet.split(b'\r\n\r\n', 1)
-        filehash, block_id_b = header.split(b' ')
+        filehash, block_id_b = header.split(b' ', 1) # possible for block_id_b to contain \x20
         block_id = int.from_bytes(block_id_b)
         return Block(filehash, block_id, data)
 

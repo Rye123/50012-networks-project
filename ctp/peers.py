@@ -6,6 +6,7 @@ from uuid import uuid1, UUID
 from queue import Queue, Empty
 from typing import Any, Type, List, Callable, Tuple
 from time import sleep
+from traceback import format_exc
 
 from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 from ctp.ctp import PLACEHOLDER_CLUSTER_ID, PLACEHOLDER_SENDER_ID
@@ -261,6 +262,7 @@ class Listener:
                 pass
             except Exception as e:
                 logging.critical(f"Listener crashed with exception: {str(e)}")
+                logging.critical(format_exc())
                 break
         sock.close()
 
