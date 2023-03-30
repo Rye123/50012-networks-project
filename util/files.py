@@ -7,7 +7,7 @@ from math import ceil
 import logging
 
 FILENAME_MAX_LENGTH = 255
-BLOCK_HEADER_SIZE = 1
+BLOCK_HEADER_SIZE = 25
 MAX_BLOCK_SIZE = CTPMessage.MAX_DATA_LENGTH - BLOCK_HEADER_SIZE
 DEFAULT_SHARED_DIR = Path('./shared')
 
@@ -174,6 +174,11 @@ class Block:
         {filehash} {block ID}\r\n
         {data}
         ```
+
+        Header will be 25 bytes:
+        - 16 bytes from filehash
+        - 4 bytes from block ID
+        - Additional header space and double CRLF: 5 bytes
         """
         return self.filehash + b' ' + self.block_id.to_bytes(4) + b'\r\n\r\n' + self.data
 
