@@ -1,12 +1,24 @@
-
+import logging
+import sys
 ### DEEP DARK MAGIC TO ALLOW FOR ABSOLUTE IMPORT
 from pathlib import Path
-import sys
 path = str(Path(Path(__file__).parent.absolute()).parent.absolute())
 sys.path.insert(0, path)
 ### END OF DEEP DARK MAGIC
 
 from ctp import RequestHandler, CTPMessage, CTPMessageType, CTPPeer
+from util import standardHandler
+
+# Logging Settings
+APP_LOGGING_LEVEL = logging.DEBUG
+CTP_LOGGING_LEVEL = logging.WARNING # Recieve only warnings.
+
+logger = logging.getLogger()
+logger.setLevel(APP_LOGGING_LEVEL)
+ctp_logger = logging.getLogger('ctp')
+ctp_logger.setLevel(CTP_LOGGING_LEVEL)
+logger.addHandler(standardHandler)
+
 
 class EchoRequestHandler(RequestHandler):
     """
@@ -14,14 +26,17 @@ class EchoRequestHandler(RequestHandler):
     """
     def handle_status_request(self, request: CTPMessage):
         # Format the response data to contain the server ID
+        logger.info(f"Received STATUS_REQUEST from {request.sender_id}")
         data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
         self.send_response(CTPMessageType.STATUS_RESPONSE, data)
 
     def handle_notification(self, request: CTPMessage):
+        logger.info(f"Received NOTIFICATION from {request.sender_id}")
         data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
         self.send_response(CTPMessageType.NOTIFICATION_ACK, data)
     
     def handle_block_request(self, request: CTPMessage):
+        logger.info(f"Received BLOCK_REQUEST from {request.sender_id}")
         data:bytes = self.peer.cluster_id.encode("ascii") + b": " + request.data
         self.send_response(CTPMessageType.BLOCK_RESPONSE, data)
     
@@ -45,15 +60,16 @@ peer = CTPPeer(
     requestHandlerClass=EchoRequestHandler
 )
 try:
+    logger.info("Peer initialised, listening.")
     peer.listen()
     while(True): 
         # Main Loop
         command = input().lower()
         if command == "exit":
-            print("Exit command, stopping peer...")
+            logger.info("Exit command, stopping peer...")
             break
 except KeyboardInterrupt:
-    print("Keyboard Interrupt, stopping peer...")
+    logger.info("Keyboard Interrupt, stopping peer...")
 finally:
     peer.end()
-    print("Peer ended.")
+    logger.info("Peer ended.")

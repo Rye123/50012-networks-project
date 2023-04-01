@@ -16,9 +16,10 @@ When sent a `STATUS_REQUEST`, the peer will respond with a single \
 See the `example_peer_list.txt` for the data.
 """
 
-import traceback
+import logging
 from time import sleep
 from typing import Type, Tuple, List, Dict
+from traceback import format_exc
 
 ### DEEP DARK MAGIC TO ALLOW FOR ABSOLUTE IMPORT
 from pathlib import Path
@@ -28,6 +29,17 @@ sys.path.insert(0, path)
 ### END OF DEEP DARK MAGIC
 
 from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType, CTPConnectionError
+from util import standardHandler
+
+# Logging Settings
+APP_LOGGING_LEVEL = logging.DEBUG
+CTP_LOGGING_LEVEL = logging.WARNING # Recieve only warnings.
+
+logger = logging.getLogger()
+logger.setLevel(APP_LOGGING_LEVEL)
+ctp_logger = logging.getLogger('ctp')
+ctp_logger.setLevel(CTP_LOGGING_LEVEL)
+logger.addHandler(standardHandler)
 
 class PeerInfo:
     """
@@ -48,6 +60,7 @@ class PeerRequestHandler(RequestHandler):
         """
         Handle STATUS_REQUEST by returning the status.
         """
+        logger.info(f"Received STATUS_REQUEST from {request.sender_id}")
         data = b"status: 1"
         self.send_response(
             CTPMessageType.STATUS_RESPONSE,
@@ -58,6 +71,7 @@ class PeerRequestHandler(RequestHandler):
         """
         Handle NOTIFICATION with a NOTIFICATION_ACK.
         """
+        logger.info(f"Received NOTIFICATION from {request.sender_id}")
         self.send_response(
             CTPMessageType.NOTIFICATION_ACK,
             b''
@@ -66,13 +80,8 @@ class PeerRequestHandler(RequestHandler):
     def handle_block_request(self, request: CTPMessage):
         """
         Handle BLOCK_REQUEST with a BLOCK_RESPONSE
-        #TODO: how to indicate no block?
         """
-        # Parse request
-
-        # Check if we have the block
-
-        # Conjure data
+        logger.info(f"Received BLOCK_REQUEST from {request.sender_id}")
         data = b'No data'
         self.send_response(
             CTPMessageType.BLOCK_RESPONSE,
@@ -80,12 +89,14 @@ class PeerRequestHandler(RequestHandler):
         )
     
     def handle_no_op(self, request: CTPMessage):
+        logger.info(f"Received NO_OP from {request.sender_id}")
         pass
 
     def handle_unknown_request(self, request: CTPMessage):
         """
         Handle unknown request by returning the status.
         """
+        logger.info(f"Received UNKNOWN REQUEST from {request.sender_id}")
         data = b"status: 1"
         self.send_response(
             CTPMessageType.STATUS_RESPONSE,
@@ -151,9 +162,10 @@ if __name__ == "__main__":
 
     print("Listener set up. Press ENTER to begin sending.")
     try:
+        logger.info("Peer initialised, listening.")
         input()
     except KeyboardInterrupt:
-        print("Exited before sending messages.")
+        logger.info("Exited before sending messages.")
         peer.end()
 
     # message send loop
@@ -172,29 +184,30 @@ if __name__ == "__main__":
                 try:
                     message = f"{short_id}-{messages_sent}"
                     # Send the STATUS_REQUEST
+                    logger.info(f"Sending STATUS_REQUEST #{messages_sent} to {dest_peer_id}.")
                     peer.send_request(
                         CTPMessageType.STATUS_REQUEST,
                         message.encode('ascii'),
                         dest_peer_info.address,
                         retries=1
                     )
+                    logger.info(f"{dest_peer_id} received request.")
                 except CTPConnectionError as e: #TODO: change
                     # Error in the connection, probably because the peer has closed connection.
                     # So we end it, and remove the peer from the peermap.
-                    print(f"Peer {dest_peer_info.peer_id[:6]} has closed connection. \n\tError was: {str(e)}")
+                    logger.info(f"Peer {dest_peer_info.peer_id[:6]} has closed connection. \n\tError was: {str(e)}")
                     peer.peermap.pop(dest_peer_id)
                 messages_sent += 1
                 peermap_iter += 1
                 sleep(1)
     except KeyboardInterrupt:
-        print("Keyboard Interrupt detected.")
+        logger.info("Keyboard Interrupt detected.")
     except Exception as e:
         # End connection SAFELY.
-        print("Ending connection due to Exception: " + str(e))
-        print("\nError Traceback: \n\n---\n")
-        traceback.print_exc()
+        logger.critical("Ending connection due to Exception: " + str(e))
+        logger.critical(format_exc)
         print("Ending peer...")
     finally:
         peer.peermap.clear()
         peer.end()
-        print("Peer ended.")
+        logger.info("Peer ended.")
