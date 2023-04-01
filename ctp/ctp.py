@@ -1,10 +1,8 @@
 import struct
-import logging
 from enum import IntEnum
 from typing import Dict, Any
 from uuid import uuid4
 
-logging.basicConfig(level = logging.DEBUG)
 PLACEHOLDER_CLUSTER_ID:str = uuid4().hex
 PLACEHOLDER_SENDER_ID:str = uuid4().hex
 

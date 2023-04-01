@@ -6,6 +6,8 @@ from typing import List
 from math import ceil
 import logging
 
+logger = logging.getLogger(__name__)
+
 FILENAME_MAX_LENGTH = 255
 BLOCK_HEADER_SIZE = 25
 MAX_BLOCK_SIZE = CTPMessage.MAX_DATA_LENGTH - BLOCK_HEADER_SIZE
@@ -278,13 +280,13 @@ class File:
         # Save the fileinfo
         fileinfo = self.fileinfo
         crinfo_file = fileinfo.save_crinfo(shared_dir)
-        logging.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
+        logger.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
 
         data = b''.join([block.data for block in self.blocks])
         path = shared_dir.joinpath(self.fileinfo.filename)
         ensure_shared_folder(shared_dir)
         write_file(path, data)
-        logging.info(f"{self.fileinfo.filename} written to directory.")
+        logger.info(f"{self.fileinfo.filename} written to directory.")
         return path
     
     def save_temp_file(self) -> Path:
@@ -303,7 +305,7 @@ class File:
         # Save the fileinfo
         fileinfo = self.fileinfo
         crinfo_file = fileinfo.save_crinfo(shared_dir)
-        logging.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
+        logger.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
 
         block_pointers:List[bytes] = []
         data = b'' 
@@ -323,7 +325,7 @@ class File:
         path = shared_dir.joinpath(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT}")
         ensure_shared_folder(shared_dir)
         write_file(path, full_data)
-        logging.info(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT} written to directory.")
+        logger.info(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT} written to directory.")
         return path
 
     def __repr__(self) -> str:
