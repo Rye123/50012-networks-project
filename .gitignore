@@ -3,3 +3,6 @@
 
 # ignore VSCode settings
 .vscode/
+
+# ignore application shared directory
+shared/

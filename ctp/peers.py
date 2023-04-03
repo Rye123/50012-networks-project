@@ -6,13 +6,14 @@ from uuid import uuid1, UUID
 from queue import Queue, Empty
 from typing import Any, Type, List, Callable, Tuple
 from time import sleep
+from traceback import format_exc
 
 from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 from ctp.ctp import PLACEHOLDER_CLUSTER_ID, PLACEHOLDER_SENDER_ID
 
 AddressType = Tuple[str, int]
 ENCODING = 'ascii'
-# logging.basicConfig(filename='example.log', encoding='utf-8', level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 class RequestHandler(ABC):
     """
@@ -260,7 +261,8 @@ class Listener:
             except TimeoutError:
                 pass
             except Exception as e:
-                logging.critical(f"Listener crashed with exception: {str(e)}")
+                logger.critical(f"Listener crashed with exception: {str(e)}")
+                logger.critical(format_exc())
                 break
         sock.close()
 
@@ -313,18 +315,18 @@ class CTPPeer:
 
         match level:
             case "debug":
-                logging.debug(message)
+                logger.debug(message)
             case "info":
-                logging.info(message)
+                logger.info(message)
             case "warning":
-                logging.warning(message)
+                logger.warning(message)
             case "error":
-                logging.error(message)
+                logger.error(message)
             case "critical":
-                logging.critical(message)
+                logger.critical(message)
             case _:
-                logging.warning(f"{self.short_peer_id}: Unknown log level used for the following message:")
-                logging.info(message)
+                logger.warning(f"{self.short_peer_id}: Unknown log level used for the following message:")
+                logger.info(message)
 
     def _send_message(self, message: CTPMessage, destination_addr: AddressType):
         """
