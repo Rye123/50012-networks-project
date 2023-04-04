@@ -159,9 +159,17 @@ class Block:
     
     The filehash matches this block to the appropriate local FileInfo object, the block ID identifies the \
     index of the block in relation to the local file.
+
+    Raises a `ValueError` if the arguments are invalid.
     """
 
     def __init__(self, filehash: bytes, block_id: int, data: bytes=b''):
+        if not(isinstance(filehash, bytes) and len(filehash) == 16):
+            raise ValueError("Invalid arguments for Block: Invalid filehash")
+        if not isinstance(block_id, int):
+            raise ValueError("Invalid arguments for Block: block_id should be an int")
+        if not isinstance(data, bytes):
+            raise ValueError("Invalid arguments for Block: data should be in bytes")
         self.filehash = filehash
         self.block_id = block_id
         self.downloaded = not (len(data) == 0)
@@ -188,11 +196,15 @@ class Block:
     def unpack(packet: bytes) -> 'Block':
         """
         Unpacks the data from a deencapsulated bytestring.
+        Returns `None` if the `packet` does not give a proper block.
         """
-        header, data = packet.split(b'\r\n\r\n', 1)
-        filehash, block_id_b = header.split(b' ', 1) # possible for block_id_b to contain \x20
-        block_id = int.from_bytes(block_id_b, 'big')
-        return Block(filehash, block_id, data)
+        try:
+            header, data = packet.split(b'\r\n\r\n', 1)
+            filehash, block_id_b = header.split(b' ', 1) # possible for block_id_b to contain \x20
+            block_id = int.from_bytes(block_id_b, 'big')
+            return Block(filehash, block_id, data)
+        except ValueError:
+            return None
 
     def __eq__(self, other: 'Block'):
         return (self.filehash == other.filehash) and \
