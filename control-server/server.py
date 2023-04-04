@@ -13,6 +13,7 @@ from ctp.peers import
 
 AddressType = Tuple[str, int]
 ENCODING = 'ascii'
+logger = logging.getLogger(__name__)
 
 class RequestHandler(ABC):
     """
@@ -35,14 +36,14 @@ class RequestHandler(ABC):
 
     An example implementation is the `DefaultRequestHandler`.
     """
-    def __init__(self, peer: 'CTPPeer', request: CTPMessage, client_addr: AddressType):
+    def __init__(self, server: 'LocalServer', request: CTPMessage, server_addr: AddressType):
         """
         Initialise the RequestHandler with a new request.
         """
-        self.peer = peer
-        self.client_addr = client_addr
+        self.server = server
+        self.server_addr = server_addr
         self.request = request
-        self.peer._log("info", f"Received {request.msg_type.name} from {client_addr}.")
+        self.server._log("info", f"Received {request.msg_type.name} from {server_addr}.")
         match request.msg_type:
             case CTPMessageType.STATUS_REQUEST:
                 self.handle_status_request(request)
@@ -60,7 +61,7 @@ class RequestHandler(ABC):
         """
         Ends the connection.
         """
-        self.peer._log("info", "Closing connection.")
+        self.server._log("info", "Closing connection.")
     
     def send_response(self, msg_type: CTPMessageType, data: bytes):
         """
@@ -74,11 +75,11 @@ class RequestHandler(ABC):
         response = CTPMessage(
             msg_type,
             data,
-            self.peer.cluster_id,
-            self.peer.peer_id
+            self.server.cluster_id,
+            self.server.peer_id
         )
-        self.peer._send_message(response, self.client_addr)
-        self.peer._log("debug", f"Responded with {response.msg_type.name}.")
+        self.server._send_message(response, self.client_addr)
+        self.server._log("debug", f"Responded with {response.msg_type.name}.")
     
     @abstractmethod
     def cleanup(self):
@@ -153,14 +154,45 @@ class DefaultRequestHandler(RequestHandler):
 
 class LocalServer:
 
-    def __init__(self, ):
+    def __init__(self, 
+                 server_addr: AddressType, 
+                 cluster_id: str=PLACEHOLDER_CLUSTER_ID, 
+                 server_id: str=PLACEHOLDER_SENDER_ID, 
+                 peer_list: list=[],
+                 file_manifest: list=[],
+                 requestHandlerClass: Type[RequestHandler]=DefaultRequestHandler):
         self.server_addr = server_addr
+        self.cluster_id = cluster_id
+        self.server_id = server_id
         self.peer_list = peer_list
         self.file_manifest = file_manifest
         self.requestHandlerClass:Type[RequestHandler] = requestHandlerClass
         self.sock = socket(AF_INET, SOCK_DGRAM)
         self.sock.bind(server_addr)
         self.listener = Listener(self)
+
+    def _log(self, level: str, message: str):
+        """
+        Helper function to log messages regarding this peer.
+        """
+        level = level.lower()
+        message = f"{self.short_peer_id}: {message}" # use short id to shorten logging messages
+        #TODO: probably another better way to do this
+
+        match level:
+            case "debug":
+                logger.debug(message)
+            case "info":
+                logger.info(message)
+            case "warning":
+                logger.warning(message)
+            case "error":
+                logger.error(message)
+            case "critical":
+                logger.critical(message)
+            case _:
+                logger.warning(f"{self.short_peer_id}: Unknown log level used for the following message:")
+                logger.info(message)
 
     def listen(self):
         """
@@ -171,11 +203,21 @@ class LocalServer:
         self.listener.listen()
         self._log("info", f"Listening on {self.server_addr}.")
 
-    def update_peer_list(self, msg_type: CTPMessageType, stored_list: peer_list):
-
+    def update_incoming_peer(self, msg_type: CTPMessageType, incoming_peer: AddressType):
         
+        self.peer_list.append(incoming_peer)
+        return self.peer_list
+               
+    def remove_outgoing_peer(self, msg_type: CTPMessageType, outgoing_peer: AddressType):
 
-    def update_file_manifest(self, msg_type: CTPMessageType, stored_list: file_manifest):
+        self.peer_list.remove(outgoing_peer)
+        return self.peer_list
+
+    def update_file_manifest(self, msg_type: CTPMessageType, incoming_list: file_manifest):
+
+        if self.file_manifest != incoming_list:
+            if 
+
 
     def send_peer_list(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=1.0, retries: int=0):
 
@@ -259,7 +301,7 @@ class Listener:
         self._stop_listening = Event()
 
     def listen(self):
-        self._listen_thread = Thread(target=self._listen, args=[self.peer, self._stop_listening, self.handlerClass, self._responses, self._new_response_arrived])
+        self._listen_thread = Thread(target=self._listen, args=[self.server, self._stop_listening, self.handlerClass, self._responses, self._new_response_arrived])
         self._listen_thread.start()
         self._stop_listening.clear()
 
@@ -315,7 +357,7 @@ class Listener:
     @staticmethod
     def _listen(server: 'LocalServer', stop_signal: Event, req_h: RequestHandler, res_q: Queue, resp_arrived: Event):
         sock = server.sock
-        src_addr = server.peer_addr
+        src_addr = server.server_addr
         while not stop_signal.is_set():
             try:
                 data, addr = sock.recvfrom(CTPMessage.MAX_PACKET_SIZE)
