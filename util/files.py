@@ -182,7 +182,7 @@ class Block:
         - 4 bytes from block ID
         - Additional header space and double CRLF: 5 bytes
         """
-        return self.filehash + b' ' + self.block_id.to_bytes(4) + b'\r\n\r\n' + self.data
+        return self.filehash + b' ' + self.block_id.to_bytes(4, 'big') + b'\r\n\r\n' + self.data
 
     @staticmethod
     def unpack(packet: bytes) -> 'Block':
@@ -191,7 +191,7 @@ class Block:
         """
         header, data = packet.split(b'\r\n\r\n', 1)
         filehash, block_id_b = header.split(b' ', 1) # possible for block_id_b to contain \x20
-        block_id = int.from_bytes(block_id_b)
+        block_id = int.from_bytes(block_id_b, 'big')
         return Block(filehash, block_id, data)
 
     def __eq__(self, other: 'Block'):
@@ -311,10 +311,10 @@ class File:
         data = b'' 
         for block in self.blocks:
             if not block.downloaded:
-                block_pointers.append((-1).to_bytes(4, signed=True))
+                block_pointers.append((-1).to_bytes(4, byteorder='big', signed=True))
             else:
                 # len(data) gives the first byte of this block
-                block_pointer = len(data).to_bytes(4, signed=True)
+                block_pointer = len(data).to_bytes(4, byteorder='big', signed=True)
                 data += block.data
                 block_pointers.append(block_pointer)
         
@@ -420,18 +420,18 @@ class File:
         # Process block pointers
         block_data:List[bytes] = []
         for i in range(1, len(header)-1):
-            first_bytepos = int.from_bytes(header[i], signed=True)
+            first_bytepos = int.from_bytes(header[i], byteorder='big', signed=True)
             if first_bytepos == -1:
                 block_data.append(b'')
             else:
-                last_bytepos = int.from_bytes(header[i+1], signed=True)
+                last_bytepos = int.from_bytes(header[i+1], byteorder='big', signed=True)
                 if last_bytepos == -1:
                     block_data.append(data[first_bytepos:])
                 else:
                     block_data.append(data[first_bytepos:last_bytepos]) 
 
         # Process final block
-        first_bytepos = int.from_bytes(header[-1], signed=True)
+        first_bytepos = int.from_bytes(header[-1], byteorder='big', signed=True)
         if first_bytepos == -1:
             block_data.append(b'')
         else:
