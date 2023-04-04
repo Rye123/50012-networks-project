@@ -11,13 +11,18 @@ class InvalidCTPMessageError(Exception):
         super().__init__(*args)
 
 class CTPMessageType(IntEnum):
-    STATUS_REQUEST   = 0b00000000
-    STATUS_RESPONSE  = 0b00000001
-    NOTIFICATION     = 0b00000010
-    NOTIFICATION_ACK = 0b00000011
-    BLOCK_REQUEST    = 0b00000100
-    BLOCK_RESPONSE   = 0b00000101
-    NO_OP            = 0b11111110
+    STATUS_REQUEST        = 0b00000000
+    STATUS_RESPONSE       = 0b00000001
+    NOTIFICATION          = 0b00000010
+    NOTIFICATION_ACK      = 0b00000011
+    BLOCK_REQUEST         = 0b00000100
+    BLOCK_RESPONSE        = 0b00000101
+    CLUSTER_JOIN_REQUEST  = 0b00000110 # Request to join a cluster.
+    CLUSTER_JOIN_RESPONSE = 0b00000111 # Response from server to a CLUSTER_JOIN_REQUEST
+    MANIFEST_REQUEST      = 0b00001000 # Request for the file manifest from the server.
+    MANIFEST_RESPONSE     = 0b00001001 # Response containing the file manifest.
+    NO_OP                 = 0b11111110 # A no-operation message, typically used for keep-alive
+    UNEXPECTED_REQ        = 0b11111111 # A RESPONSE that indicates an unexpected request
 
     def is_request(self) -> bool:
         """

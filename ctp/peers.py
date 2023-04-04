@@ -24,15 +24,20 @@ class RequestHandler(ABC):
     - `self.client_addr`: The request sender's address
     - `self.request`: The actual request
 
-    This class has several abstract methods that should be \
-        implemented, these provide functionality to handle given requests. \
-            We almost always want to respond to the request, since the \
-                client's default state is to wait for a response. 
+    This class has several methods that should be implemented, these provide \
+    functionality to handle given requests. \
     - `cleanup()`
     - `handle_status_request(request)`
     - `handle_notification(request)`
     - `handle_block_request(request)`
     - `handle_unknown_request(request)`.
+
+    In general, these should be implemented since the requester **expects** a response for these.
+    - If not overwritten, the default response is an `UNEXPECTED_REQ` response.
+    - Note that the `NO_OP` message does not expect a response.
+
+    If necessary (e.g. implementing a server), the `handle` method can be overwritten to support \
+    more functions.
 
     An example implementation is the `DefaultRequestHandler`.
     """
@@ -43,7 +48,16 @@ class RequestHandler(ABC):
         self.peer = peer
         self.client_addr = client_addr
         self.request = request
-        self.peer._log("info", f"Received {request.msg_type.name} from {client_addr}.")
+        self.handle(request)
+        self.cleanup()
+    
+    def handle(self, request: CTPMessage):
+        """
+        Handles a given request.
+
+        This can be overwritten if we're expecting more requests
+        """
+        self.peer._log("info", f"Received {request.msg_type.name} from {self.client_addr}.")
         match request.msg_type:
             case CTPMessageType.STATUS_REQUEST:
                 self.handle_status_request(request)
@@ -55,7 +69,6 @@ class RequestHandler(ABC):
                 self.handle_no_op(request)
             case _:
                 self.handle_unknown_request(request)
-        self.cleanup()
     
     def close(self):
         """
@@ -81,39 +94,34 @@ class RequestHandler(ABC):
         self.peer._send_message(response, self.client_addr)
         self.peer._log("debug", f"Responded with {response.msg_type.name}.")
     
-    @abstractmethod
     def cleanup(self):
         """
         Handles the cleanup after a request.
         Most of the time, we want to end the interaction, which can be done with the `.close()` method.
         """
-        pass
+        self.close()
     
-    @abstractmethod
     def handle_status_request(self, request: CTPMessage):
         """
         Handles a `STATUS_REQUEST`.
         This should send an appropriate `STATUS_RESPONSE`, with the `send_response` method.
         """
-        pass
+        self.send_response(CTPMessageType.STATUS_RESPONSE, b'status: 1')
     
-    @abstractmethod
     def handle_notification(self, request: CTPMessage):
         """
         Handles a `NOTIFICATION`.
         This should send an appropriate `NOTIFICATION_ACK`, with the `send_response` method.
         """
-        pass
+        self.send_response(CTPMessageType.UNEXPECTED_REQ, b'not implemented')
 
-    @abstractmethod
     def handle_block_request(self, request: CTPMessage):
         """
         Handles a `BLOCK_REQUEST`.
         This should send an appropriate `BLOCK_RESPONSE`, with the `send_response` method.
         """
-        pass
+        self.send_response(CTPMessageType.UNEXPECTED_REQ, b'not implemented')
     
-    @abstractmethod
     def handle_no_op(self, request: CTPMessage):
         """
         Handles a `NO_OP`.
@@ -121,14 +129,13 @@ class RequestHandler(ABC):
         """
         pass
     
-    @abstractmethod
     def handle_unknown_request(self, request: CTPMessage):
         """
         Handle an unknown request.
         We shouldn't be able to reach this point, but if there's a request defined in the future \
             that isn't handled by the above methods, it will be handled here.
         """
-        pass
+        self.send_response(CTPMessageType.UNEXPECTED_REQ, b'unknown request')
 
 class DefaultRequestHandler(RequestHandler):
     """
