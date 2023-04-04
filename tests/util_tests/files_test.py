@@ -4,6 +4,7 @@ from util.files import *
 from time import sleep
 from copy import deepcopy
 from random import randint
+from hashlib import md5
 
 TEST_FILE_DIR_PATH = Path("./tests/util_tests/test_files")
 
@@ -20,6 +21,21 @@ def copy_dir(src_dir: Path, tgt_dir: Path):
             # Make directory
             copy_path.mkdir(exist_ok=True)
             copy_dir(child, copy_path)
+
+class TestBlock(unittest.TestCase):
+    def test_pack_and_unpack_should_be_consistent(self):
+        data = b"The quick brown fox DESTROYS the lazy dog with FACTS and LOGIC"
+        filehash = md5(data).digest()
+        block = Block(filehash, randint(0, 99), data)
+        packet = block.pack()
+        block_unpacked = Block.unpack(packet)
+        self.assertEqual(block, block_unpacked)
+        data = b""
+        filehash = md5(data).digest()
+        block = Block(filehash, randint(0, 99), data)
+        packet = block.pack()
+        block_unpacked = Block.unpack(packet)
+        self.assertEqual(block, block_unpacked)
 
 class TestFileInfo(unittest.TestCase):
     def setUp(self):

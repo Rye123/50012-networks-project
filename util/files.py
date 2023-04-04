@@ -1,13 +1,16 @@
 from hashlib import md5
 from pathlib import Path
-from ctp import CTPMessage
+from ctp import CTPMessage, CTPMessageType
 from util import get_current_timestamp
 from typing import List
 from math import ceil
 import logging
 
+logger = logging.getLogger(__name__)
+
 FILENAME_MAX_LENGTH = 255
-MAX_BLOCK_SIZE = CTPMessage.MAX_DATA_LENGTH
+BLOCK_HEADER_SIZE = 25
+MAX_BLOCK_SIZE = CTPMessage.MAX_DATA_LENGTH - BLOCK_HEADER_SIZE
 DEFAULT_SHARED_DIR = Path('./shared')
 
 def ensure_shared_folder(shared_dir: Path):
@@ -158,11 +161,44 @@ class Block:
     index of the block in relation to the local file.
     """
 
-    def __init__(self, filehash: str, block_id: int, data: bytes=b''):
+    def __init__(self, filehash: bytes, block_id: int, data: bytes=b''):
         self.filehash = filehash
         self.block_id = block_id
         self.downloaded = not (len(data) == 0)
         self.data = data
+
+    def pack(self) -> bytes:
+        """
+        Packs the data into a packet that can then be encapsulated.
+
+        Returns a bytestring:
+        ```
+        {filehash} {block ID}\r\n
+        {data}
+        ```
+
+        Header will be 25 bytes:
+        - 16 bytes from filehash
+        - 4 bytes from block ID
+        - Additional header space and double CRLF: 5 bytes
+        """
+        return self.filehash + b' ' + self.block_id.to_bytes(4) + b'\r\n\r\n' + self.data
+
+    @staticmethod
+    def unpack(packet: bytes) -> 'Block':
+        """
+        Unpacks the data from a deencapsulated bytestring.
+        """
+        header, data = packet.split(b'\r\n\r\n', 1)
+        filehash, block_id_b = header.split(b' ', 1) # possible for block_id_b to contain \x20
+        block_id = int.from_bytes(block_id_b)
+        return Block(filehash, block_id, data)
+
+    def __eq__(self, other: 'Block'):
+        return (self.filehash == other.filehash) and \
+            (self.block_id == other.block_id) and \
+            (self.data == other.data) and \
+            (self.downloaded == other.downloaded)
 
 class FileError(Exception):
     """
@@ -218,6 +254,17 @@ class File:
                 return False
         return True
 
+    def delete_local_copy(self):
+        """
+        Deletes a local copy of this file (temp or otherwise).
+        Note: The `FileInfo` of this file will still exist!
+        """
+        filepath:Path = self.shared_dir.joinpath(self.fileinfo.filename)
+        tempfilepath:Path = self.shared_dir.joinpath(self.fileinfo.filename + '.' + File.TEMP_FILE_EXT)
+        
+        filepath.unlink(missing_ok=True)
+        tempfilepath.unlink(missing_ok=True)
+
     def save_file(self) -> Path:
         """
         Saves this file. Returns the path of the file.
@@ -233,13 +280,13 @@ class File:
         # Save the fileinfo
         fileinfo = self.fileinfo
         crinfo_file = fileinfo.save_crinfo(shared_dir)
-        logging.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
+        logger.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
 
         data = b''.join([block.data for block in self.blocks])
         path = shared_dir.joinpath(self.fileinfo.filename)
         ensure_shared_folder(shared_dir)
         write_file(path, data)
-        logging.info(f"{self.fileinfo.filename} written to directory.")
+        logger.info(f"{self.fileinfo.filename} written to directory.")
         return path
     
     def save_temp_file(self) -> Path:
@@ -258,7 +305,7 @@ class File:
         # Save the fileinfo
         fileinfo = self.fileinfo
         crinfo_file = fileinfo.save_crinfo(shared_dir)
-        logging.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
+        logger.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
 
         block_pointers:List[bytes] = []
         data = b'' 
@@ -278,7 +325,7 @@ class File:
         path = shared_dir.joinpath(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT}")
         ensure_shared_folder(shared_dir)
         write_file(path, full_data)
-        logging.info(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT} written to directory.")
+        logger.info(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT} written to directory.")
         return path
 
     def __repr__(self) -> str:
