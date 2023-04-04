@@ -102,7 +102,7 @@ class PeerRequestHandler(RequestHandler):
 
         if resp_packet is None:
             # Indicate not found with an echoed packet.
-            resp_packet = packet
+            resp_packet = b''
 
         # Return the response
         self.send_response(
@@ -239,7 +239,7 @@ class Peer(CTPPeer):
                     response_pkt = response.data
                     response_block = Block.unpack(response_pkt)
 
-                    if response_block.downloaded:
+                    if response_block is not None and response_block.downloaded:
                         block.downloaded = True
                         block.data = response_block.data
                         logger.debug(f"Request: block {block.block_id}, file {file.fileinfo.filehash} from {dest_peer.peer_id}: HIT")

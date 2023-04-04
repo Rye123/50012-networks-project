@@ -82,7 +82,7 @@ if __name__ == "__main__":
                     peer.sync_files()
                 case "SCAN":
                     print("-- Syncing files... --")
-                    peer.load_from_dir()
+                    peer.scan_local_dir()
                 case "EXIT":
                     print("-- Exiting... --")
                     break
