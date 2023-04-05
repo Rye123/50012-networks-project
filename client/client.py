@@ -132,7 +132,7 @@ class Peer(CTPPeer):
     - `peermap`: Maps the peer ID to the corresponding `PeerInfo` object.
     
     """
-    def __init__(self, peer_info: PeerInfo, shared_dir: Path, initial_peerlist:List[PeerInfo]=[]):
+    def __init__(self, peer_info: PeerInfo, shared_dir: Path, server_addr: AddressType, initial_peerlist:List[PeerInfo]=[]):
         """
         Initialise the peer, with a given `peer_info` object.
         """
@@ -147,12 +147,47 @@ class Peer(CTPPeer):
 
         self.filelist:List[File] = []
         self.peermap:Dict[str, PeerInfo] = dict()
+        self.server_addr = server_addr
 
         # Initialisation
         self.filelist = self.scan_local_dir()
         self._bootstrap_peermap(initial_peerlist)
         self.sync_peermap()
     
+    def join_cluster(self):
+        response = self.send_request_to_server(
+            CTPMessageType.CLUSTER_JOIN_REQUEST,
+            b'',
+            retries=2
+        )
+        if response is None:
+            raise ValueError(f"Could not connect.")
+        if response.msg_type == CTPMessageType.INVALID_REQ:
+            raise ValueError(response.data.decode('ascii'))
+        if response.msg_type != CTPMessageType.CLUSTER_JOIN_RESPONSE:
+            raise ValueError(f"Unexpected response {response.msg_type}")
+
+        # Process the response (list of peers in ASCII)
+        data = response.data.decode('ascii')
+        lines = data.split("\r\n")
+        peerlist:List[PeerInfo] = []
+        for line in lines:
+            try:
+                peer_id, ip_addr, port = line.split(' ')
+                peer_info = PeerInfo(self.cluster_id, peer_id, (ip_addr, int(port)))
+                peerlist.append(peer_info)
+            except ValueError:
+                raise ValueError("Invalid response from server.")
+        
+        # Overwrite peermap
+        self.peermap = {}
+        for peerinfo in peerlist:
+            if peerinfo.peer_id != self.peer_id and peerinfo.address != self.peer_addr:
+                self.peermap[peerinfo.peer_id] = peerinfo
+        
+        #TODO: auto send no_ops for liveness.
+
+
     def share(self, file: File):
         """
         Shares `file`. 
@@ -262,6 +297,14 @@ class Peer(CTPPeer):
             file.save_file()
         else:
             file.save_temp_file()
+
+    def send_request_to_server(self, msg_type: CTPMessageType, data: bytes, timeout: float = 1, retries: int = 0) -> CTPMessage:
+        dest_addr = self.server_addr
+        try:
+            response = super().send_request(msg_type, data, dest_addr, timeout, retries)
+            return response
+        except CTPConnectionError:
+            return None
     
     def send_request(self, msg_type: CTPMessageType, data: bytes, dest_peer_id: str, timeout: float = 1, retries: int = 0) -> CTPMessage:
         """
