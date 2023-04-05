@@ -21,8 +21,11 @@ class CTPMessageType(IntEnum):
     CLUSTER_JOIN_RESPONSE = 0b00000111 # Response from server to a CLUSTER_JOIN_REQUEST
     MANIFEST_REQUEST      = 0b00001000 # Request for the file manifest from the server.
     MANIFEST_RESPONSE     = 0b00001001 # Response containing the file manifest.
+    CRINFO_REQUEST        = 0b00001010 # Request for the CRINFO file with the filename given as data.
+    CRINFO_RESPONSE       = 0b00001011 # Response containing the CRINFO file data.
+    INVALID_REQ           = 0b11111101 # A RESPONSE that indicates an error with the request sender.
     NO_OP                 = 0b11111110 # A no-operation message, typically used for keep-alive
-    UNEXPECTED_REQ        = 0b11111111 # A RESPONSE that indicates an unexpected request
+    UNEXPECTED_REQ        = 0b11111111 # A RESPONSE that indicates an unexpected request.
 
     def is_request(self) -> bool:
         """
