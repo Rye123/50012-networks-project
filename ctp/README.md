@@ -152,7 +152,8 @@ Depends on message type:
   ```
 - `CLUSTER_JOIN_REQUEST`: Request to join a cluster. No data expected, the cluster is indicated in the `cluster_id` part of the packet.
 - `CLUSTER_JOIN_RESPONSE`: Response from the CTP server. (ASCII)
-  - Data contains a list of peers in teh form: `{peer_id} {address}`, separated by `\r\n`.
+  - Data contains a list of peers in the form: `{peer_id} {address}`, separated by `\r\n`.
+    - `address` is in the form `{IP address} {port}`.
 - `MANIFEST_REQUEST`: Request the file manifest `CRINFO`, which will update the `CRINFO` file `/manifest/crinfo/.manifest.crinfo`.
 - `MANIFEST_RESPONSE`: Response from the server, containing the manifest `CRINFO` file. (bytes)
   - The `data` portion of the response is the entire file.
