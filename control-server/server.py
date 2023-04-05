@@ -9,7 +9,6 @@ from time import sleep
 
 from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 from ctp.ctp import PLACEHOLDER_CLUSTER_ID, PLACEHOLDER_SENDER_ID
-from ctp.peers import 
 
 AddressType = Tuple[str, int]
 ENCODING = 'ascii'
@@ -161,6 +160,21 @@ class LocalServer:
                  peer_list: list=[],
                  file_manifest: list=[],
                  requestHandlerClass: Type[RequestHandler]=DefaultRequestHandler):
+        
+        if not isinstance(cluster_id, str):
+            raise TypeError("Invalid type for cluster_id: cluster_id is not a str.")
+        if not isinstance(server_id, str):
+            raise TypeError("Invalid type for server_id: server_id is not a str.")
+        if not isinstance(server_addr, Tuple):
+            if not isinstance(server_addr[0], str) or not isinstance(server_addr[1], int):
+                raise TypeError("Invalid server_addr: server_addr should be a tuple of an IP address and a port.")
+        cluster_id_b = cluster_id.encode(ENCODING)
+        server_id_b = server_id.encode(ENCODING)
+        if len(cluster_id_b) != 32:
+            raise ValueError(f"cluster_id of invalid length: {len(cluster_id_b)} != 32")
+        if len(server_id_b) != 32:
+            raise ValueError(f"server_id of invalid length: {len(server_id_b)} != 32")
+
         self.server_addr = server_addr
         self.cluster_id = cluster_id
         self.server_id = server_id
@@ -203,25 +217,37 @@ class LocalServer:
         self.listener.listen()
         self._log("info", f"Listening on {self.server_addr}.")
 
-    def update_incoming_peer(self, msg_type: CTPMessageType, incoming_peer: AddressType):
+    def update_incoming_peer(self, incoming_peer: AddressType):
         
         self.peer_list.append(incoming_peer)
         return self.peer_list
                
-    def remove_outgoing_peer(self, msg_type: CTPMessageType, outgoing_peer: AddressType):
+    def remove_outgoing_peer(self, outgoing_peer: AddressType):
 
         self.peer_list.remove(outgoing_peer)
         return self.peer_list
 
-    def update_file_manifest(self, msg_type: CTPMessageType, incoming_list: file_manifest):
-
+    def update_file_manifest(self, incoming_list):
+        
         if self.file_manifest != incoming_list:
-            if 
+            if len(self.file_manifest) < len(incoming_list):
+                for filename in incoming_list:
+                    if filename not in self.file_manifest:
+                        self.file_manifest.append(filename)
 
+        return self.file_manifest
 
-    def send_peer_list(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=1.0, retries: int=0):
+    def _send_message(self, message: CTPMessage, destination_addr: AddressType):
+        """
+        Sends `message` to the desired destination.
+        - This method isn't meant to be used -- use the higher-level `send_request` or `send_response` methods instead.
+        """
+        packet = message.pack()
+        self.sock.sendto(packet, destination_addr)
 
-        message = CTPMessage(msg_type, data, self.cluster_id, self.peer_id)
+    def sync_peer_list(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=1.0, retries: int=0):
+
+        message = CTPMessage(msg_type, [ord(_) for _ in self.peer_list], self.cluster_id, self.server_id)
 
         attempts = 0
         successful_send = False
@@ -230,27 +256,6 @@ class LocalServer:
             attempts += 1
             try:
                 self._send_message(message, dest_addr)
-                response = None
-                expected_response_type = None
-                match message.msg_type:
-                    case CTPMessageType.STATUS_REQUEST:
-                        expected_response_type = CTPMessageType.STATUS_RESPONSE
-                    case CTPMessageType.NOTIFICATION:
-                        expected_response_type = CTPMessageType.NOTIFICATION_ACK
-                    case CTPMessageType.BLOCK_REQUEST:
-                        expected_response_type = CTPMessageType.BLOCK_RESPONSE
-                if expected_response_type is None:
-                    # Return none if msg_type doesn't match any, i.e. no response expected
-                    return None
-                
-                response = self.listener.get_response(
-                    expected_addr=dest_addr,
-                    expected_type=expected_response_type,
-                    block_time=timeout
-                )
-                if response is None:
-                    # No response from get_response, message was a timeout.
-                    raise TimeoutError()
                 successful_send = True
                 # Successful response received, break from loop
                 break
@@ -277,7 +282,42 @@ class LocalServer:
                 fail_reason = "Unknown error."
             raise CTPConnectionError(f"send_request: Failed to send request after attempt {attempts}, reason was: {fail_reason}")
 
-        return response
+    def sync_manifest(self, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float=1.0, retries: int=0):
+
+        message = CTPMessage(msg_type, bytes(self.file_manifest), self.cluster_id, self.server_id)
+
+        attempts = 0
+        successful_send = False
+        fail_reason = ""
+        while attempts <= retries:
+            attempts += 1
+            try:
+                self._send_message(message, dest_addr)
+                successful_send = True
+                # Successful response received, break from loop
+                break
+            except TimeoutError:
+                self._log("debug", f"send_request: Attempt {attempts} failed: Timeout.")
+                fail_reason = "TIMEOUT"
+                pass
+            except InvalidCTPMessageError:
+                self._log("debug", f"send_request: Attempt {attempts} failed: Invalid response.")
+                fail_reason = "INVALID RESPONSE"
+                pass
+            except ConnectionError as e:
+                self._log("debug", f"send_request: Attempt {attempts} failed: Connection error.")
+                fail_reason = "CONNECTION"
+                pass
+            except Exception as e:
+                self._log("debug", f"send_request Exception: {str(e)}")
+                fail_reason = "EXCEPTION"
+                pass
+        if successful_send:
+            self._log("info", f"send_request: Response received after attempt {attempts}: {response.msg_type.name} from {dest_addr}")
+        else:
+            if fail_reason == "":
+                fail_reason = "Unknown error."
+            raise CTPConnectionError(f"send_request: Failed to send request after attempt {attempts}, reason was: {fail_reason}")
     
     def end(self):
         """
