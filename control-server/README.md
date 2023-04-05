@@ -1,40 +1,8 @@
 # `control-server`
 
-## API
-### `GET /cluster/{cluster_id}`: 
-Get a cluster.
-- Authentication should be done at this stage.
-- Returns a list of active peers:
-  - Peer ID
-  - Peer IP:port
-
-### `PUT /cluster/{cluster_id}/`:
-Join a cluster. In the request body:
-- Peer ID
-- IP Address
-- Port
-
-### `POST /cluster/`:
-Create a new cluster.
-
-### `POST /cluster/{cluster_id}/wellness_check`
-Requests the server to update the peerlist regarding the given peer. The server will then conduct a `CTP STATUS_REQUEST` to the given peer.
-
-In the request body:
-- Peer ID
-
-### `GET /cluster/{cluster_id}/manifestHash`
-Returns the hash of the entire manifest.
-
-### `GET /cluster/{cluster_id}/manifest`
-Request the manifest from the server. 
-Returns the given manifest data.
-
-### `POST /cluster/{cluster_id}/manifest`
-Sends an update to the manifest. Request body should contain the local manifest.
-Returns the updated manifest hash.
-- An update will only occur if a **new** file has been added.
-
-### `GET/cluster/{cluster_id}/getFileCreator?fileId={fileId}`
-Gets the IP address of the creator of the given file.
-- Since the IP address can be changed, the server will return the *current* IP address of the file owner. If the owner is offline, the server returns an empty response.
+## File Manifest
+A file `./manifest/.crmanifest`, stored in the working directory of the server (and each client).
+- This is stored as a list of ASCII filenames, separated by `\r\n`.
+- When a client requests for an update, it will first delete its local copy of the manifest `CRINFO` (`./manifest/crinfo/.crmanifest.crinfo`) and send a `MANIFEST_REQUEST` message for the updated manifest `CRINFO`.
+  - Then, it will request the entire manifest file in a series of `BLOCK_REQUEST`s.
+- Each file's `CRINFO` file will be stored on the server in `./crinfo`.
