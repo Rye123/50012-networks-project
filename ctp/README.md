@@ -118,11 +118,11 @@ The above API abstracts away the handling of socket sending and receiving of the
 | `CLUSTER_JOIN_REQUEST`  | `0000 0110`        | Peer requesting the server to join a client. No data expected.                                         |
 | `CLUSTER_JOIN_RESPONSE` | `0000 0111`        | Response from the server in ASCII. A list of peers, separated by `\r\n`.                               |
 | `MANIFEST_REQUEST`      | `0000 1000`        | Request for the manifest `CRINFO` file from the server.                                                |
-| `MANIFEST_RESPONSE`     | `0000 1001`        | Response containing the manifest `CRINFO` file. This file contains a list of filenames in the cluster. |
+| `MANIFEST_RESPONSE`     | `0000 1001`        | Response containing the manifest `CRINFO` file.  |
 | `CRINFO_REQUEST`        | `0000 1010`        | Request a specific file's `CRINFO`. Data in ASCII, `filename: ...`.                                    |
 | `CRINFO_RESPONSE`       | `0000 1011`        | Response containing the file's `CRINFO`. Data in bytes.                                                |
-| `INVALID_REQUEST`       | `1111 1101`        | Response regarding an invalid request (client-side error).                                             |
-| `NO_OP`                 | `1111 1110`        | A request that expects no response. Error message will be in ASCII.                                    |
+| `INVALID_REQUEST`       | `1111 1101`        | Response regarding an invalid request (client-side error). Error message will be in ASCII.                                            |
+| `NO_OP`                 | `1111 1110`        | A request that expects no response.                                     |
 | `UNEXPECTED_REQ`        | `1111 1111`        | Response stating that a given request was unexpected or unsupported. Error message will be ASCII.      |
 
 - **Cluster ID (32 bytes)**: A 32-byte value representing the ID of the cluster.
@@ -134,19 +134,32 @@ Total header length is 65 bytes.
 ### Data
 Depends on message type:
 - `STATUS_REQUEST`: Request a status update from the destination.
-- `STATUS_RESPONSE`: Respond to a status request.
-  - Status
+- `STATUS_RESPONSE`: Respond to a status request. (ASCII)
+  - Status 
     - `0`: Cannot service further requests
     - `1`: Alive
-- `NOTIFICATION`: Inform the destination of something
-  - Message
+- `NOTIFICATION`: Inform the destination of something (ASCII)
+  - Message 
 - `NOTIFICATION_ACK`: Acknowledge a notification
-- `BLOCK_REQUEST`: Request a given block from the destination.
+- `BLOCK_REQUEST`: Request a given block from the destination. (defined under `util.files.Block`)
   ```
   {filehash}-{block id}
   ```
-- `BLOCK_RESPONSE`: Respond to a given block request
+- `BLOCK_RESPONSE`: Respond to a given block request. (defined under `util.files.Block`)
   ```
   {filehash}-{block id}-{status}\r\n\r\n
   {block data (if any)}
   ```
+- `CLUSTER_JOIN_REQUEST`: Request to join a cluster. No data expected, the cluster is indicated in the `cluster_id` part of the packet.
+- `CLUSTER_JOIN_RESPONSE`: Response from the CTP server. (ASCII)
+  - Data contains a list of peers in teh form: `{peer_id} {address}`, separated by `\r\n`.
+- `MANIFEST_REQUEST`: Request the file manifest `CRINFO`, which will update the `CRINFO` file `/manifest/crinfo/.manifest.crinfo`.
+- `MANIFEST_RESPONSE`: Response from the server, containing the manifest `CRINFO` file. (bytes)
+  - The `data` portion of the response is the entire file.
+- `INVALID_REQUEST`: A response indicating a client-side error. (ASCII)
+  - `data` contains the error.
+- `NO_OP`: A request that expects no response. (ASCII).
+  - `data` will be in ASCII.
+- `UNEXPECTED_REQ`: A response indicating an unexpected request from the client. (ASCII)
+  - `data` contains the error.
+
