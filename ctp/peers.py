@@ -209,13 +209,16 @@ class Listener:
         timeout_signal = Event()
         timer = Timer(block_time, self._response_timer, args=[timeout_signal])
 
+        expected_responses = [CTPMessageType.INVALID_REQ, CTPMessageType.UNEXPECTED_REQ]
+        if expected_type is not None:
+            expected_responses.append(expected_type)
         # Check if response is already in queue
         with self._responses.mutex:
             for tup in self._responses.queue:
                 response, addr = tup
-                if (expected_addr is None and expected_type == response.msg_type) \
+                if (expected_addr is None and response.msg_type in expected_responses) \
                     or (expected_addr == addr and expected_type is None) \
-                    or (expected_addr == addr and expected_type == response.msg_type):
+                    or (expected_addr == addr and response.msg_type in expected_responses):
                     self._responses.queue.remove(tup)
                     return response
         # Add watch signal to the response_signal
@@ -230,9 +233,9 @@ class Listener:
                 with self._responses.mutex:
                     for tup in self._responses.queue:
                         response, addr = tup
-                        if (expected_addr is None and expected_type == response.msg_type) \
+                        if (expected_addr is None and response.msg_type in expected_responses) \
                             or (expected_addr == addr and expected_type is None) \
-                            or (expected_addr == addr and expected_type == response.msg_type):
+                            or (expected_addr == addr and response.msg_type in expected_responses):
                             timer.cancel()
                             self._responses.queue.remove(tup)
                             return response
@@ -385,6 +388,12 @@ class CTPPeer:
                         expected_response_type = CTPMessageType.NOTIFICATION_ACK
                     case CTPMessageType.BLOCK_REQUEST:
                         expected_response_type = CTPMessageType.BLOCK_RESPONSE
+                    case CTPMessageType.CLUSTER_JOIN_REQUEST:
+                        expected_response_type = CTPMessageType.CLUSTER_JOIN_RESPONSE
+                    case CTPMessageType.MANIFEST_REQUEST:
+                        expected_response_type = CTPMessageType.MANIFEST_RESPONSE
+                    case CTPMessageType.CRINFO_REQUEST:
+                        expected_response_type = CTPMessageType.CRINFO_RESPONSE
                 if expected_response_type is None:
                     # Return none if msg_type doesn't match any, i.e. no response expected
                     return None
