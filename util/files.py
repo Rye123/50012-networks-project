@@ -96,6 +96,45 @@ class SharedDirectory:
             self.filemap[file.fileinfo.filename] = file
             logger.debug(f"{self.dirpath}: Loaded empty file from {child}")
 
+    def add_file(self, filename: str, data: bytes):
+        """
+        Adds a new file to this directory, writing it to disk.
+        - This creates a corresponding FileInfo object.
+        - If the file already exists, it will be deleted along with its FileInfo object.
+        """
+        filepath = self.dirpath.joinpath(filename)
+        if filepath.is_file():
+            self.delete_file(filename)
+
+        with filepath.open('wb') as f:
+            f.write(data)
+        
+        file = File.from_file(filepath)
+        file.write_file()
+        self.filemap[filename] = file
+
+    def add_fileinfo(self, filename: str, data: bytes):
+        """
+        Adds a new FileInfo to this directory, writing it to disk.
+        - This creates the corresponding File in the parent directory (i.e. empty tempfile)
+        - `filename` should be the name of the actual file, not of the CRINFO file.
+        """
+        fileinfo = FileInfo._from_bytes(self, filename, data)
+        fileinfo.write()
+        file = File.from_crinfo(fileinfo.filepath)
+        file.write_temp_file()
+        self.filemap[filename] = file
+    
+    def delete_file(self, filename: str):
+        """
+        Deletes a file from this directory, and removing it from disk.
+        - This removes the corresponding FileInfo.
+        """
+        self.filemap.pop(filename, None)
+        filepath = self.dirpath.joinpath(filename)
+        crinfopath = self.crinfo_dirpath.joinpath(f"{filename}.{FileInfo.CRINFO_EXT}")
+        filepath.unlink(missing_ok=True)
+        crinfopath.unlink(missing_ok=True)
 
 class FileInfo:
     """
@@ -154,7 +193,7 @@ class FileInfo:
     @staticmethod
     def from_crinfo(path: Path) -> 'FileInfo':
         """
-        Generates a `FileInfo` object from a given CRINFO file name.
+        Generates a `FileInfo` object from a path to a CRINFO file.
         """
         if not path.suffix == f".{FileInfo.CRINFO_EXT}":
             raise ValueError(f"from_crinfo: Invalid CRINFO file ({path} has an invalid extension)")
@@ -362,6 +401,7 @@ class File:
         Writes this file to disk.
         - This will automatically write the corresponding `FileInfo` to disk.
         - Raises a `FileError` if the file is not fully downloaded.
+        - This will OVERWRITE any existing file of the same path.
         """
 
         if not self.downloaded:
@@ -382,6 +422,7 @@ class File:
         Write this TEMP file to disk. Returns the path of the saved temporary file.
         - This will automatically save the corresponding `FileInfo` in the shared folder of the file.
         - Raises a `FileError` if the file is fully downloaded.
+        - This will OVERWRITE any existing file of the same path.
 
         Refer to `README.md` for the documentation of a temp file.
         """

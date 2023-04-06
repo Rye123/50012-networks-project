@@ -248,6 +248,7 @@ class TestSharedDirectory(unittest.TestCase):
         # Load full file
         self.filename = "suck.jpg"
         self.full_file:File = File.from_file(self.test_dir.joinpath(self.filename))
+        self.full_file.write_file()
 
     def test_full_file(self):
         shared_dir_path = self.test_dir.joinpath("full_file")
@@ -290,7 +291,127 @@ class TestSharedDirectory(unittest.TestCase):
         self.assertEqual(file.fileinfo, self.full_file.fileinfo)
         self.assertEqual(file.downloaded_blockcount, 0)
         self.assertEqual(file.fileinfo.block_count, 280)
-
     
+    def test_add_file(self):
+        """
+        Copies the test file into a new shared directory `test_add_file`, \
+        and compares that test file with the copy.
+
+        This tests `add_file()`.
+        """
+        f_data = b''
+        with self.test_dir.joinpath(self.filename).open('rb') as f:
+            f_data = f.read()
+        shared_dir_path = self.test_dir.joinpath("test_add_file")
+        shared_dir_path.mkdir(exist_ok=True)
+        shared_dir = SharedDirectory(shared_dir_path)
+
+        shared_dir.add_file(self.filename, f_data)
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.blocks, self.full_file.blocks)
+
+        # Ensure only one file in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 1)
+        self.assertEqual(crinfo_count, 1)
+        self.assertEqual(len(shared_dir.filemap), 1)
+
+        # Test a repeated call
+        shared_dir.add_file(self.filename, f_data)
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.blocks, self.full_file.blocks)
+        
+        # Ensure only one file in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 1)
+        self.assertEqual(crinfo_count, 1)
+        self.assertEqual(len(shared_dir.filemap), 1)
+
+    def test_delete_file(self):
+        """
+        Copies the test file into a new shared directory `test_add_file`, \
+        and tries to delete it.
+        """
+        f_data = b''
+        with self.test_dir.joinpath(self.filename).open('rb') as f:
+            f_data = f.read()
+        shared_dir_path = self.test_dir.joinpath("test_delete_file")
+        shared_dir_path.mkdir(exist_ok=True)
+        shared_dir = SharedDirectory(shared_dir_path)
+
+        shared_dir.add_file(self.filename, f_data)
+        file = shared_dir.filemap.get(self.filename)
+        # Ensure only one file in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 1)
+        self.assertEqual(crinfo_count, 1)
+        self.assertEqual(len(shared_dir.filemap), 1)
+        
+        shared_dir.delete_file(self.filename)
+        # Ensure NO files in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 0)
+        self.assertEqual(crinfo_count, 0)
+        self.assertEqual(len(shared_dir.filemap), 0)
+
+    def test_add_fileinfo(self):
+        """
+        Creates an empty tempfile from the test file's FileInfo, and compares accordingly.
+        """
+        finfo_data = b''
+        with self.full_file.fileinfo.filepath.open('rb') as f:
+            finfo_data = f.read()
+        shared_dir_path = self.test_dir.joinpath("test_add_fileinfo")
+        shared_dir_path.mkdir(exist_ok=True)
+        shared_dir = SharedDirectory(shared_dir_path)
+
+        shared_dir.add_fileinfo(self.filename, finfo_data)
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.downloaded_blockcount, 0)
+
+        # Ensure only one file in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 1)
+        self.assertEqual(crinfo_count, 1)
+        self.assertEqual(len(shared_dir.filemap), 1)
+
     def tearDown(self):
         self._test_dir.cleanup()
