@@ -48,7 +48,9 @@ class SharedDirectory:
         # Ensure the directory exists
         self.dirpath.mkdir(exist_ok=True)
         self.crinfo_dirpath.mkdir(exist_ok=True)
-        
+
+        logger.info(f"Initialised shared directory at {self.dirpath}")
+
     def refresh(self):
         """
         Scans the local directory for new files.
@@ -194,6 +196,7 @@ class FileInfo:
     def from_crinfo(path: Path) -> 'FileInfo':
         """
         Generates a `FileInfo` object from a path to a CRINFO file.
+        - This will not create the corresponding File. To do that, call the `File.from_crinfo()` method instead.
         """
         if not path.suffix == f".{FileInfo.CRINFO_EXT}":
             raise ValueError(f"from_crinfo: Invalid CRINFO file ({path} has an invalid extension)")

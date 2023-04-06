@@ -40,8 +40,9 @@ def setup_peer(this_peer_id: str) -> Peer:
 
     this_peer = Peer(
         peer_info=this_peerinfo,
-        shared_dir=Path(f"./tests/client_tests/data/{this_peer_shareddir}"),
-        initial_peerlist=peerlist
+        shared_dir_path=Path(f"./tests/client_tests/data/{this_peer_shareddir}"),
+        initial_peerlist=peerlist,
+        server_addr=DEFAULT_SERVER_ADDRESS
     )
     return this_peer
 
@@ -70,19 +71,24 @@ if __name__ == "__main__":
             command = input().upper()
             match command:
                 case "SYNC":
-                    print("-- Syncing peers... --")
+                    print("SYNC: Syncing peers.")
                     peer.sync_peermap()
-                    print("-- Syncing files... --")
+                    print("SYNC: Peers synced.")
+                    print("SYNC: Syncing files.")
                     peer.sync_files()
+                    print("SYNC: Files synced.")
                 case "SYNC PEERS":
-                    print("-- Syncing peers... --")
+                    print("SYNC PEERS: Syncing peers.")
                     peer.sync_peermap()
+                    print("SYNC PEERS: Peers synced.")
                 case "SYNC FILES":
-                    print("-- Syncing files... --")
+                    print("SYNC FILES: Syncing files.")
                     peer.sync_files()
+                    print("SYNC FILES: Files synced.")
                 case "SCAN":
-                    print("-- Syncing files... --")
+                    print("SCAN: Updating files from local directory...")
                     peer.scan_local_dir()
+                    print("SCAN: Files updated.")
                 case "EXIT":
                     print("-- Exiting... --")
                     break

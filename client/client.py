@@ -5,7 +5,7 @@ from time import sleep
 import logging
 from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType, CTPConnectionError, AddressType
 from util import FileInfo, File, FileError, Block
-from util import ensure_shared_folder, standardHandler
+from util import standardHandler, SharedDirectory
 
 # Logging Settings
 APP_LOGGING_LEVEL = logging.DEBUG
@@ -21,6 +21,7 @@ util_logger.setLevel(UTIL_LOGGING_LEVEL)
 logger.addHandler(standardHandler)
 
 BOOTSTRAPPED_PEERLIST:List['PeerInfo'] = []
+DEFAULT_SERVER_ADDRESS = ('127.0.0.1', 6969)
 
 class Cluster:
     """
@@ -84,7 +85,8 @@ class PeerRequestHandler(RequestHandler):
 
         # Check if we have the block
         resp_packet = None
-        for f in self.peer.filelist:
+        filelist = [f for f in self.peer.shareddir.filemap.values()]
+        for f in filelist:
             if f.fileinfo.filehash != requested_block.filehash:
                 continue
             for block in f.blocks:
@@ -92,7 +94,6 @@ class PeerRequestHandler(RequestHandler):
                     continue
                 # Found, return the response if it's downloaded
                 if block.downloaded:
-                    block_data = block.data
                     resp_packet = block.pack()
                 else:
                     # it's not downloaded, but we DID find it
@@ -132,7 +133,7 @@ class Peer(CTPPeer):
     - `peermap`: Maps the peer ID to the corresponding `PeerInfo` object.
     
     """
-    def __init__(self, peer_info: PeerInfo, shared_dir: Path, server_addr: AddressType, initial_peerlist:List[PeerInfo]=[]):
+    def __init__(self, peer_info: PeerInfo, shared_dir_path: Path, server_addr: AddressType, initial_peerlist:List[PeerInfo]=[]):
         """
         Initialise the peer, with a given `peer_info` object.
         """
@@ -142,20 +143,16 @@ class Peer(CTPPeer):
             peer_id=peer_info.peer_id,
             requestHandlerClass=PeerRequestHandler
         )
-        self.shared_dir = shared_dir
-        ensure_shared_folder(self.shared_dir)
+        self.shareddir = SharedDirectory(shared_dir_path)
 
-        self.filelist:List[File] = []
         self.peermap:Dict[str, PeerInfo] = dict()
         self.server_addr = server_addr
 
-        self.manifest_path = shared_dir.joinpath("manifest")
-        self.manifest_crinfo_path = self.manifest_path.joinpath("crinfo/.crmanifest.crinfo")
-        ensure_shared_folder(self.manifest_path)
-        ensure_shared_folder(self.manifest_crinfo_path.parent)
+        manifest_path = shared_dir_path.joinpath("manifest")
+        self.manifestdir = SharedDirectory(manifest_path)
 
         # Initialisation
-        self.filelist = self.scan_local_dir()
+        self.scan_local_dir()
         self._bootstrap_peermap(initial_peerlist)
         self.sync_peermap()
     
@@ -191,7 +188,6 @@ class Peer(CTPPeer):
                 self.peermap[peerinfo.peer_id] = peerinfo
         
         #TODO: auto send no_ops for liveness.
-
 
     def share(self, file: File):
         """
@@ -250,7 +246,7 @@ class Peer(CTPPeer):
         retries = 1 # number of retries to send for EVERY request
 
         # Get all non-downloaded files
-        filelist = [f for f in self.filelist if (not f.downloaded)]
+        filelist = [f for f in self.shareddir.filemap.values() if (not f.downloaded)]
         for file in filelist:
             blocks = [b for b in file.blocks if (not b.downloaded)]
             for block in blocks:
@@ -260,6 +256,7 @@ class Peer(CTPPeer):
                     dest_peer = self.get_peer({"counter": counter})
                     if dest_peer is None:
                         logger.debug("Could not sync files, no peers available.")
+                        break
 
                     # Send the request
                     response = self.send_request(
@@ -282,10 +279,10 @@ class Peer(CTPPeer):
                     if response_block is not None and response_block.downloaded:
                         block.downloaded = True
                         block.data = response_block.data
-                        logger.debug(f"Request: block {block.block_id}, file {file.fileinfo.filehash} from {dest_peer.peer_id}: HIT")
+                        logger.debug(f"Request: block {block.block_id}, file {file.fileinfo.filename} from {dest_peer.peer_id}: HIT")
                         break
                     else:
-                        logger.debug(f"Request: block {block.block_id}, file {file.fileinfo.filehash} from {dest_peer.peer_id}: MISS")
+                        logger.debug(f"Request: block {block.block_id}, file {file.fileinfo.filename} from {dest_peer.peer_id}: MISS")
                         pass
             logger.debug(f"Progress: {file}")
             self.store_file(file)
@@ -299,9 +296,9 @@ class Peer(CTPPeer):
 
         ## Save relevant version
         if file.downloaded:
-            file.save_file()
+            file.write_file()
         else:
-            file.save_temp_file()
+            file.write_temp_file()
 
     def send_request_to_server(self, msg_type: CTPMessageType, data: bytes, timeout: float = 1, retries: int = 0) -> CTPMessage:
         dest_addr = self.server_addr
@@ -342,97 +339,28 @@ class Peer(CTPPeer):
     
     def scan_local_dir(self):
         """
-        Scan through the local shared directory for files.
+        Updates the in-memory shared directory with the local directory.
         """
-        filelist:List[File] = []
-
-        # Scan through directory to identify relevant files
-        crinfo_dir_path:Path = None
-        file_paths:List[Path] = []
-        tempfile_paths:List[Path] = []
-        crinfo_paths:List[Path] = []
-        for child in self.shared_dir.iterdir():
-            if child.is_dir():
-                if child.name == FileInfo.CRINFO_DIR_NAME:
-                    crinfo_dir_path = child
-                continue #TODO: should we handle other directories?
-
-            if child.suffix == f".{File.TEMP_FILE_EXT}":
-                tempfile_paths.append(child)
-            else:
-                file_paths.append(child)
-        
-        # Scan through identified crinfo directory for CRINFO files
-        for child in crinfo_dir_path.iterdir():
-            if child.is_dir():
-                continue # ignore directories in here
-            if child.suffix == f".{FileInfo.CRINFO_EXT}":
-                crinfo_paths.append(child)
-        
-        # Now we load the files based on the paths
-        ## Load fully-downloaded files
-        for file_path in file_paths:
-            file = None
-            try:
-                file = File.from_file(file_path)
-                filelist.append(file)
-            except FileError as e:
-                logger.warning(f"Could not load file from {file_path}, error was: {str(e)}")
-                continue
-
-            fileinfo_path = crinfo_dir_path.joinpath(f"{file.fileinfo.filename}.{FileInfo.CRINFO_EXT}")
-
-            if fileinfo_path in crinfo_paths:
-                logger.debug(f"Loading existing file from {file_path} with CRINFO from {fileinfo_path}.")
-                crinfo_paths.remove(fileinfo_path)
-            else:
-                logger.debug(f"Loading new file from {file_path}")
-                file.fileinfo.save_crinfo(self.shared_dir)
-        ## Load tempfiles
-        for tempfile_path in tempfile_paths:
-            tempfile = None
-            try:
-                tempfile = File.from_temp_file(tempfile_path)
-                filelist.append(tempfile)
-            except FileError as e:
-                logger.warning(f"Could not load file from {tempfile_path}, error was: {str(e)}")
-                continue
-
-            fileinfo_path = crinfo_dir_path.joinpath(f"{tempfile.fileinfo.filename}.{FileInfo.CRINFO_EXT}")
-
-            if fileinfo_path in crinfo_paths:
-                logger.debug(f"Loading existing tempfile from {tempfile_path} with CRINFO {fileinfo_path}.")
-                crinfo_paths.remove(fileinfo_path)
-            else:
-                logger.error(f"Error: Tempfile {tempfile.fileinfo.filename} does not have a corresponding fileinfo object.")
-                raise NotImplemented
-
-        # Load files from remaining fileInfos (i.e. empty files)
-        for fileinfo_path in crinfo_paths:
-            fileinfo = FileInfo.from_crinfo(fileinfo_path)
-            file = File(fileinfo, self.shared_dir)
-            filelist.append(file)
-            logger.debug(f"Loading empty tempfile with CRINFO {fileinfo_path}.")
-
-        return filelist
+        self.shareddir.refresh()
 
     def sync_manifest(self):
         """
         Sync the file manifest with the server.
         """
-        response:CTPMessage = self.send_request_to_server(
-            CTPMessageType.MANIFEST_REQUEST, 
-            b'',
-            timeout=1,
-            retries=3
-        )
+        pass
+        # response:CTPMessage = self.send_request_to_server(
+        #     CTPMessageType.MANIFEST_REQUEST, 
+        #     b'',
+        #     timeout=1,
+        #     retries=3
+        # )
 
-        if response.msg_type != CTPMessageType.MANIFEST_RESPONSE:
-            raise ValueError("Could not connect") #TODO: create a proper connectionerror
+        # if response.msg_type != CTPMessageType.MANIFEST_RESPONSE:
+        #     raise ValueError("Could not connect") #TODO: create a proper connectionerror
 
-        # Overwrite existing manifest
-        with self.manifest_crinfo_path.joinpath("").open('wb') as f:
-            f.write(response.data)
+        # # Overwrite existing manifest
+        # with self.manifest_crinfo_path.joinpath("").open('wb') as f:
+        #     f.write(response.data)
 
     def end(self):
         logger.info("Ending peer...")
@@ -440,8 +368,9 @@ class Peer(CTPPeer):
 
         logger.info("Saving files...")
         # Save all current in-memory versions of each file.
-        for file in self.filelist:
+        for file in self.shareddir.filemap.values():
             self.store_file(file)
+        logger.info("Files saved.")
 
     def _report(self, peer):
         """
