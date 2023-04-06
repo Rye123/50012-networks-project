@@ -204,7 +204,8 @@ class Block:
         """
         try:
             header, data = packet.split(b'\r\n\r\n', 1)
-            filehash, block_id_b = header.split(b' ', 1) # possible for block_id_b to contain \x20
+            filehash = header[:16]
+            block_id_b = header[17:]
             block_id = int.from_bytes(block_id_b, 'big')
             return Block(filehash, block_id, data)
         except ValueError:
