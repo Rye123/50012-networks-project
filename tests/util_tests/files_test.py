@@ -7,6 +7,7 @@ from random import randint
 from hashlib import md5
 
 TEST_FILE_DIR_PATH = Path("./tests/util_tests/test_files")
+TEST_SHARED_DIR_PATH = Path("./tests/util_tests/test_shared_dir")
 
 
 def copy_dir(src_dir: Path, tgt_dir: Path):
@@ -236,4 +237,60 @@ class TestFile(unittest.TestCase):
     def tearDown(self):
         self._test_dir.cleanup()
 
+class TestSharedDirectory(unittest.TestCase):
+    def setUp(self):
+        self._test_dir = TemporaryDirectory()
+        self.test_dir:Path = Path(self._test_dir.name)
 
+        # Load test files into test_dir
+        copy_dir(TEST_SHARED_DIR_PATH, self.test_dir)
+
+        # Load full file
+        self.filename = "suck.jpg"
+        self.full_file:File = File.from_file(self.test_dir.joinpath(self.filename))
+
+    def test_full_file(self):
+        shared_dir_path = self.test_dir.joinpath("full_file")
+        shared_dir = SharedDirectory(shared_dir_path)
+        shared_dir.refresh()
+
+        # File should be generated
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.blocks, self.full_file.blocks)
+    
+    def test_full_file_no_crinfo(self):
+        shared_dir_path = self.test_dir.joinpath("full_file_no_crinfo")
+        shared_dir = SharedDirectory(shared_dir_path)
+        shared_dir.refresh()
+
+        # File should be generated
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.blocks, self.full_file.blocks)
+    
+    def test_temp_file(self):
+        shared_dir_path = self.test_dir.joinpath("temp_file")
+        shared_dir = SharedDirectory(shared_dir_path)
+        shared_dir.refresh()
+
+        # File should be generated
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.downloaded_blockcount, 20)
+        self.assertEqual(file.fileinfo.block_count, 280)
+    
+    def test_empty_file(self):
+        shared_dir_path = self.test_dir.joinpath("empty_file")
+        shared_dir = SharedDirectory(shared_dir_path)
+        shared_dir.refresh()
+
+        # File should be generated
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.downloaded_blockcount, 0)
+        self.assertEqual(file.fileinfo.block_count, 280)
+
+    
+    def tearDown(self):
+        self._test_dir.cleanup()

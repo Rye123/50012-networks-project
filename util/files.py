@@ -43,10 +43,59 @@ class SharedDirectory:
         
         self.dirpath = path
         self.crinfo_dirpath = path.joinpath(self.CRINFO_DIRNAME)
+        self.filemap:Dict[str, File] = {}
 
         # Ensure the directory exists
         self.dirpath.mkdir(exist_ok=True)
         self.crinfo_dirpath.mkdir(exist_ok=True)
+        
+    def refresh(self):
+        """
+        Scans the local directory for new files.
+        - Any new files without a corresponding FileInfo will be processed.
+        - Any new FileInfos without a corresponding File will be processed.
+        """
+
+        # Scan shared directory
+        loaded_crinfos:List[Path] = []
+        for child in self.dirpath.iterdir():
+            if child.is_dir():
+                continue # ignore other directories
+
+            file = None
+            if child.suffix == f".{File.TEMP_FILE_EXT}":
+                try:
+                    # Add temp file
+                    file = File.from_temp_file(child)
+                    self.filemap[file.fileinfo.filename] = file
+                    logger.debug(f"{self.dirpath}: Loaded temp file from {child}")
+                except ValueError as e:
+                    logger.warning(f"Error loading from {child}: {str(e)}")
+                except FileError as e:
+                    logger.warning(f"Error loading from {child}: Corresponding FileInfo not found.")
+            else:
+                try:
+                    # Add actual file
+                    file = File.from_file(child)
+                    self.filemap[file.fileinfo.filename] = file
+                    logger.debug(f"{self.dirpath}: Loaded file from {child}")
+                except ValueError as e:
+                    logger.warning(f"Error loading from {child}: {str(e)}")
+            if file is None:
+                continue
+
+            loaded_crinfos.append(file.crinfo_filepath)
+        
+        # Scan CRINFO directory
+        for child in self.crinfo_dirpath.iterdir():
+            if child.is_dir() or child in loaded_crinfos:
+                continue
+            
+            # Generate empty tempfile
+            file = File.from_crinfo(child)
+            self.filemap[file.fileinfo.filename] = file
+            logger.debug(f"{self.dirpath}: Loaded empty file from {child}")
+
 
 class FileInfo:
     """
