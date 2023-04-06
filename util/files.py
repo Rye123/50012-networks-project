@@ -361,6 +361,15 @@ class File:
 
     def __repr__(self) -> str:
         return f"{self.fileinfo.filename}: {self.downloaded_blockcount}/{self.fileinfo.block_count} downloaded."
+    
+    @staticmethod
+    def from_crinfo(path: Path) -> 'File':
+        """
+        Loads an empty tempfile from a FileInfo `path`.
+        """
+        fileinfo = FileInfo.from_crinfo(path)
+        file = File(fileinfo)
+        return file
 
     @staticmethod
     def from_file(path: Path) -> 'File':

@@ -160,6 +160,16 @@ class TestFile(unittest.TestCase):
         temp_file_5.blocks = blocks_5
         self.temp_files.append(temp_file_5)
 
+        # Temp file 6: File with all blocks missing
+        blocks_6 = deepcopy(file.blocks)
+        for i in range(len(blocks_6)):
+            blocks_6[i].data = b''
+            blocks_6[i].downloaded = False
+        temp_file_6 = File(file.fileinfo)
+        temp_file_6.__temp_type = "File with all blocks missing"
+        temp_file_6.blocks = blocks_6
+        self.temp_files.append(temp_file_6)
+
         for temp_file in self.temp_files:
             pathstr = temp_file.write_temp_file()
 
@@ -206,6 +216,12 @@ class TestFile(unittest.TestCase):
             temp_file.write_temp_file()
 
             self.assertTrue(file.fileinfo.strictly_equal(temp_file.fileinfo), f"FileInfo does not match for {temp_file.__temp_type}")
+
+    def test_load_empty_fileinfo(self):
+        empty_tempfile = self.temp_files[5]
+        empty_fileinfo = empty_tempfile.fileinfo
+        new_empty_tempfile = File.from_crinfo(empty_fileinfo.filepath)
+        self.assertEqual(new_empty_tempfile.fileinfo, empty_tempfile.fileinfo)
 
     def test_save_temp_file_and_load(self):
         for temp_file in self.temp_files:
