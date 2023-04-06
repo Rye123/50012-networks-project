@@ -149,6 +149,11 @@ class Peer(CTPPeer):
         self.peermap:Dict[str, PeerInfo] = dict()
         self.server_addr = server_addr
 
+        self.manifest_path = shared_dir.joinpath("manifest")
+        self.manifest_crinfo_path = self.manifest_path.joinpath("crinfo/.crmanifest.crinfo")
+        ensure_shared_folder(self.manifest_path)
+        ensure_shared_folder(self.manifest_crinfo_path.parent)
+
         # Initialisation
         self.filelist = self.scan_local_dir()
         self._bootstrap_peermap(initial_peerlist)
@@ -410,6 +415,24 @@ class Peer(CTPPeer):
             logger.debug(f"Loading empty tempfile with CRINFO {fileinfo_path}.")
 
         return filelist
+
+    def sync_manifest(self):
+        """
+        Sync the file manifest with the server.
+        """
+        response:CTPMessage = self.send_request_to_server(
+            CTPMessageType.MANIFEST_REQUEST, 
+            b'',
+            timeout=1,
+            retries=3
+        )
+
+        if response.msg_type != CTPMessageType.MANIFEST_RESPONSE:
+            raise ValueError("Could not connect") #TODO: create a proper connectionerror
+
+        # Overwrite existing manifest
+        with self.manifest_crinfo_path.joinpath("").open('wb') as f:
+            f.write(response.data)
 
     def end(self):
         logger.info("Ending peer...")

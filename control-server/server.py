@@ -116,6 +116,8 @@ class ServerRequestHandler(RequestHandler):
                 self.handle_manifest_request(request)
             case CTPMessageType.CRINFO_RESPONSE:
                 self.handle_crinfo_request(request)
+            case CTPMessageType.NEW_CRINFO_NOTIF:
+                self.handle_new_crinfo_notif(request)
             case CTPMessageType.NO_OP:
                 self.handle_no_op(request)
             case _:
@@ -147,9 +149,19 @@ class ServerRequestHandler(RequestHandler):
             data_str.encode('ascii')
         )
 
+    def handle_new_crinfo_notif(self, request: CTPMessage):
+        pass
 
     def handle_manifest_request(self, request: CTPMessage):
-        pass
+        # Get the file manifest CRINFO in bytes
+        data = b''
+        with self.peer.manifest_path.parent.joinpath("crinfo/.crmanifest.crinfo").open('rb') as f:
+            data = f.read()
+
+        self.send_response(
+            CTPMessageType.MANIFEST_RESPONSE,
+            data
+        )
 
     def handle_crinfo_request(self, request: CTPMessage):
         pass
@@ -180,6 +192,17 @@ class Server(CTPPeer):
         self.clusters:Dict[str, Cluster] = {}
 
         self.cluster_id = None
+
+        self.fileinfo_map:Dict[str, FileInfo] = {} # maps filename to FileInfo object
+        self.manifest_path = Path("./control-server/manifest/.crmanifest")
+        if not self.manifest_path.is_file():
+            # Create file
+            with self.manifest_path.open('wb') as f:
+                f.write(b'')
+        self.server_path = Path("./control-server/")
+        self.file_manifest:File = File.from_file(self.manifest_path)
+        self._parse_manifest()
+
         self.requestHandlerClass = ServerRequestHandler
         self.peer_addr = address
         self.sock = socket(AF_INET, SOCK_DGRAM)
@@ -199,11 +222,49 @@ class Server(CTPPeer):
     def add_cluster(self, cluster_id: str):
         new_cluster = Cluster(cluster_id)
         self.clusters[cluster_id] = new_cluster
+    
+    def add_fileinfo(self, fileinfo: FileInfo):
+        self.fileinfo_map[fileinfo.filename] = fileinfo
+        path = fileinfo.save_crinfo(self.manifest_path)
+        logger.info(f"Saved {fileinfo.filename} to {path}.")
+        self._update_manifest()
+
+    def _update_manifest(self):
+        """
+        Updates the server's local file manifest based on the current list of FileInfos.
+        
+        TODO: refactor util.files.File to allow us to use it in a more sensible manner
+        """
+        filenames = sorted(self.fileinfo_map.keys())
+        manifest_bytes = ('\r\n'.join(filenames)).encode('ascii')
+        with self.manifest_path.open('wb') as f:
+            f.write(manifest_bytes)
+        logger.info(f"Updated stored manifest.")
+        self.file_manifest = File.from_file(self.manifest_path)
+        self.file_manifest.save_file() # save the corresponding fileinfo
+
+    def _parse_manifest(self):
+        """
+        Overwrites in-memory `fileinfo_map` with the local manifest.
+
+        TODO: refactor util.files.File to allow us to use it in a more sensible manner
+        """
+        data = self.file_manifest.data.decode('ascii')
+        filenames:List[str] = data.split('\r\n')
+        for filename in filenames:
+            filename = filename.strip()
+            if len(filename) == 0:
+                continue
+            path = self.server_path.joinpath(f"crinfo/{filename}")
+            self.fileinfo_map[filename] = FileInfo.from_crinfo(path)
+        logger.info(f"Loaded {len(self.fileinfo_map)} FileInfo objects.")
+        self.manifest_path.parent.joinpath("crinfo/.crmanifest.crinfo").unlink()
+        self.file_manifest.delete_local_copy()
+        self.file_manifest.save_file() # To auto-save the corresponding CRINFO of the file manifest.
 
 if __name__ == "__main__":
-    server = None
+    server = Server(DEFAULT_SERVER_ADDRESS)
     try:
-        server = Server(DEFAULT_SERVER_ADDRESS)
         server.add_cluster("3f80e91dc65311ed93abeddb088b3faa")
 
         server.listen()
