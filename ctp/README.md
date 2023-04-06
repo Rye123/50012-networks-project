@@ -127,6 +127,7 @@ The above API abstracts away the handling of socket sending and receiving of the
 | `NO_OP`                 | `1111 1110`        | A request that expects no response.                                                                    |
 | `UNEXPECTED_REQ`        | `1111 1111`        | Response stating that a given request was unexpected or unsupported. Error message will be ASCII.      |
 
+- **Sequence Number (4 bytes)**: A 4-byte unsigned integer representing a randomly-chosen sequence number. If the message is a response, this will be the sequence number of the request, incremented by one.
 - **Cluster ID (32 bytes)**: A 32-byte value representing the ID of the cluster.
 - **Sender ID (32 bytes)**: A 32-byte value representing the ID of the message sender.
 

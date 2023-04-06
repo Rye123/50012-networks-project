@@ -94,9 +94,12 @@ class ServerRequestHandler(RequestHandler):
         """
         if not isinstance(msg_type, CTPMessageType) or msg_type.is_request():
             raise ValueError("Invalid msg_type: msg_type should be a CTPMessageType and a response.")
+        req_seqnum = self.request.seqnum
+        resp_seqnum = req_seqnum + 1
         
         response = CTPMessage(
             msg_type,
+            resp_seqnum,
             data,
             self.cluster_id,
             self.peer_id
@@ -124,7 +127,7 @@ class ServerRequestHandler(RequestHandler):
                 self.handle_unknown_request(request)
     
     def handle_status_request(self, request: CTPMessage):
-        return super().handle_status_request(request)
+        self.send_response(CTPMessageType.STATUS_RESPONSE, b'status: 1')
 
     def handle_block_request(self, request: CTPMessage):
         return super().handle_block_request(request)
@@ -155,8 +158,8 @@ class ServerRequestHandler(RequestHandler):
     def handle_manifest_request(self, request: CTPMessage):
         # Get the file manifest CRINFO in bytes
         data = b''
-        with self.peer.manifest_path.parent.joinpath("crinfo/.crmanifest.crinfo").open('rb') as f:
-            data = f.read()
+        # with self.peer.manifest_path.parent.joinpath("crinfo/.crmanifest.crinfo").open('rb') as f:
+        #     data = f.read()
 
         self.send_response(
             CTPMessageType.MANIFEST_RESPONSE,
@@ -167,9 +170,6 @@ class ServerRequestHandler(RequestHandler):
         pass
 
     def handle_no_op(self, request: CTPMessage):
-        pass
-
-    def handle_status_request(self, request: CTPMessage):
         pass
 
     def handle_unknown_request(self, request: CTPMessage):
@@ -193,15 +193,15 @@ class Server(CTPPeer):
 
         self.cluster_id = None
 
-        self.fileinfo_map:Dict[str, FileInfo] = {} # maps filename to FileInfo object
-        self.manifest_path = Path("./control-server/manifest/.crmanifest")
-        if not self.manifest_path.is_file():
-            # Create file
-            with self.manifest_path.open('wb') as f:
-                f.write(b'')
-        self.server_path = Path("./control-server/")
-        self.file_manifest:File = File.from_file(self.manifest_path)
-        self._parse_manifest()
+        # self.fileinfo_map:Dict[str, FileInfo] = {} # maps filename to FileInfo object
+        # self.manifest_path = Path("./control-server/manifest/.crmanifest")
+        # if not self.manifest_path.is_file():
+        #     # Create file
+        #     with self.manifest_path.open('wb') as f:
+        #         f.write(b'')
+        # self.server_path = Path("./control-server/")
+        # self.file_manifest:File = File.from_file(self.manifest_path)
+        # self._parse_manifest()
 
         self.requestHandlerClass = ServerRequestHandler
         self.peer_addr = address
@@ -224,10 +224,11 @@ class Server(CTPPeer):
         self.clusters[cluster_id] = new_cluster
     
     def add_fileinfo(self, fileinfo: FileInfo):
-        self.fileinfo_map[fileinfo.filename] = fileinfo
-        path = fileinfo.save_crinfo(self.manifest_path)
-        logger.info(f"Saved {fileinfo.filename} to {path}.")
-        self._update_manifest()
+        pass
+        # self.fileinfo_map[fileinfo.filename] = fileinfo
+        # path = fileinfo.save_crinfo(self.manifest_path)
+        # logger.info(f"Saved {fileinfo.filename} to {path}.")
+        # self._update_manifest()
 
     def _update_manifest(self):
         """
@@ -235,13 +236,14 @@ class Server(CTPPeer):
         
         TODO: refactor util.files.File to allow us to use it in a more sensible manner
         """
-        filenames = sorted(self.fileinfo_map.keys())
-        manifest_bytes = ('\r\n'.join(filenames)).encode('ascii')
-        with self.manifest_path.open('wb') as f:
-            f.write(manifest_bytes)
-        logger.info(f"Updated stored manifest.")
-        self.file_manifest = File.from_file(self.manifest_path)
-        self.file_manifest.save_file() # save the corresponding fileinfo
+        pass
+        # filenames = sorted(self.fileinfo_map.keys())
+        # manifest_bytes = ('\r\n'.join(filenames)).encode('ascii')
+        # with self.manifest_path.open('wb') as f:
+        #     f.write(manifest_bytes)
+        # logger.info(f"Updated stored manifest.")
+        # self.file_manifest = File.from_file(self.manifest_path)
+        # self.file_manifest.save_file() # save the corresponding fileinfo
 
     def _parse_manifest(self):
         """
@@ -249,18 +251,19 @@ class Server(CTPPeer):
 
         TODO: refactor util.files.File to allow us to use it in a more sensible manner
         """
-        data = self.file_manifest.data.decode('ascii')
-        filenames:List[str] = data.split('\r\n')
-        for filename in filenames:
-            filename = filename.strip()
-            if len(filename) == 0:
-                continue
-            path = self.server_path.joinpath(f"crinfo/{filename}")
-            self.fileinfo_map[filename] = FileInfo.from_crinfo(path)
-        logger.info(f"Loaded {len(self.fileinfo_map)} FileInfo objects.")
-        self.manifest_path.parent.joinpath("crinfo/.crmanifest.crinfo").unlink()
-        self.file_manifest.delete_local_copy()
-        self.file_manifest.save_file() # To auto-save the corresponding CRINFO of the file manifest.
+        pass
+        # data = self.file_manifest.data.decode('ascii')
+        # filenames:List[str] = data.split('\r\n')
+        # for filename in filenames:
+        #     filename = filename.strip()
+        #     if len(filename) == 0:
+        #         continue
+        #     path = self.server_path.joinpath(f"crinfo/{filename}")
+        #     self.fileinfo_map[filename] = FileInfo.from_crinfo(path)
+        # logger.info(f"Loaded {len(self.fileinfo_map)} FileInfo objects.")
+        # self.manifest_path.parent.joinpath("crinfo/.crmanifest.crinfo").unlink()
+        # self.file_manifest.delete_local_copy()
+        # self.file_manifest.save_file() # To auto-save the corresponding CRINFO of the file manifest.
 
 if __name__ == "__main__":
     server = Server(DEFAULT_SERVER_ADDRESS)

@@ -12,8 +12,17 @@ sys.path.insert(0, path)
 
 from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType, CTPConnectionError, AddressType
 from util import FileInfo, File, FileError, Block
-from util import ensure_shared_folder
+from util import ensure_shared_folder, standardHandler
 
+# Logging Settings
+APP_LOGGING_LEVEL = logging.DEBUG
+CTP_LOGGING_LEVEL = logging.WARNING # Recieve only warnings.
+
+logger = logging.getLogger()
+logger.setLevel(APP_LOGGING_LEVEL)
+ctp_logger = logging.getLogger('ctp')
+ctp_logger.setLevel(CTP_LOGGING_LEVEL)
+logger.addHandler(standardHandler)
 BOOTSTRAPPED_PEERLIST:List['PeerInfo'] = []
 
 class PeerInfo:

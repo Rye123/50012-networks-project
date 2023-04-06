@@ -7,12 +7,14 @@ from queue import Queue, Empty
 from typing import Any, Type, List, Callable, Tuple
 from time import sleep
 from traceback import format_exc
+from random import randint
 
 from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 from ctp.ctp import PLACEHOLDER_CLUSTER_ID, PLACEHOLDER_SENDER_ID
 
 AddressType = Tuple[str, int]
 ENCODING = 'ascii'
+MAX_INT_VALUE = (2**32) - 1 # max int to fit in 4 bytes
 logger = logging.getLogger(__name__)
 
 class RequestHandler(ABC):
@@ -84,9 +86,14 @@ class RequestHandler(ABC):
         """
         if not isinstance(msg_type, CTPMessageType) or msg_type.is_request():
             raise ValueError("Invalid msg_type: msg_type should be a CTPMessageType and a response.")
+
+        # Protocol: Increment request sequence number by 1 and return as new sequence number
+        req_seqnum = self.request.seqnum
+        resp_seqnum = req_seqnum + 1
         
         response = CTPMessage(
             msg_type,
+            resp_seqnum,
             data,
             self.peer.cluster_id,
             self.peer.peer_id
@@ -200,7 +207,7 @@ class Listener:
         """
         self._stop_listening.set()
     
-    def get_response(self, expected_addr: AddressType=None, expected_type: CTPMessageType=None, block_time: int=1.0) -> CTPMessage:
+    def get_response(self, expected_seqnum: int, block_time: int=1.0) -> CTPMessage:
         """
         Checks the listener for a response. Blocks for at least `block_time` until the response is returned.
         - Returns the response, or None.
@@ -209,16 +216,11 @@ class Listener:
         timeout_signal = Event()
         timer = Timer(block_time, self._response_timer, args=[timeout_signal])
 
-        expected_responses = [CTPMessageType.INVALID_REQ, CTPMessageType.UNEXPECTED_REQ]
-        if expected_type is not None:
-            expected_responses.append(expected_type)
         # Check if response is already in queue
         with self._responses.mutex:
             for tup in self._responses.queue:
                 response, addr = tup
-                if (expected_addr is None and response.msg_type in expected_responses) \
-                    or (expected_addr == addr and expected_type is None) \
-                    or (expected_addr == addr and response.msg_type in expected_responses):
+                if (expected_seqnum == response.seqnum):
                     self._responses.queue.remove(tup)
                     return response
         # Add watch signal to the response_signal
@@ -233,10 +235,7 @@ class Listener:
                 with self._responses.mutex:
                     for tup in self._responses.queue:
                         response, addr = tup
-                        if (expected_addr is None and response.msg_type in expected_responses) \
-                            or (expected_addr == addr and expected_type is None) \
-                            or (expected_addr == addr and response.msg_type in expected_responses):
-                            timer.cancel()
+                        if (expected_seqnum == response.seqnum):
                             self._responses.queue.remove(tup)
                             return response
         # Timeout, gg
@@ -367,7 +366,8 @@ class CTPPeer:
             if not isinstance(dest_addr[0], str) or not isinstance(dest_addr[1], int):
                 raise TypeError("Invalid dest_addr: dest_addr should be a tuple of an IP address and a port.")
 
-        message = CTPMessage(msg_type, data, self.cluster_id, self.peer_id)
+        seqnum = randint(0, MAX_INT_VALUE)
+        message = CTPMessage(msg_type, seqnum, data, self.cluster_id, self.peer_id)
         
         self._log("info", f"Sending {msg_type.name} to {dest_addr}.")
         
@@ -380,27 +380,11 @@ class CTPPeer:
             try:
                 self._send_message(message, dest_addr)
                 response = None
-                expected_response_type = None
-                match message.msg_type:
-                    case CTPMessageType.STATUS_REQUEST:
-                        expected_response_type = CTPMessageType.STATUS_RESPONSE
-                    case CTPMessageType.NOTIFICATION:
-                        expected_response_type = CTPMessageType.NOTIFICATION_ACK
-                    case CTPMessageType.BLOCK_REQUEST:
-                        expected_response_type = CTPMessageType.BLOCK_RESPONSE
-                    case CTPMessageType.CLUSTER_JOIN_REQUEST:
-                        expected_response_type = CTPMessageType.CLUSTER_JOIN_RESPONSE
-                    case CTPMessageType.MANIFEST_REQUEST:
-                        expected_response_type = CTPMessageType.MANIFEST_RESPONSE
-                    case CTPMessageType.CRINFO_REQUEST:
-                        expected_response_type = CTPMessageType.CRINFO_RESPONSE
-                if expected_response_type is None:
-                    # Return none if msg_type doesn't match any, i.e. no response expected
+                if message.msg_type == CTPMessageType.NO_OP: # we expect no response
                     return None
                 
                 response = self.listener.get_response(
-                    expected_addr=dest_addr,
-                    expected_type=expected_response_type,
+                    expected_seqnum=seqnum+1,
                     block_time=timeout
                 )
                 if response is None:
