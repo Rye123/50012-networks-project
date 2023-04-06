@@ -2,7 +2,7 @@ from hashlib import md5
 from pathlib import Path
 from ctp import CTPMessage, CTPMessageType
 from util import get_current_timestamp
-from typing import List
+from typing import List, Dict
 from math import ceil
 import logging
 
@@ -11,18 +11,6 @@ logger = logging.getLogger(__name__)
 FILENAME_MAX_LENGTH = 255
 BLOCK_HEADER_SIZE = 25
 MAX_BLOCK_SIZE = CTPMessage.MAX_DATA_LENGTH - BLOCK_HEADER_SIZE
-DEFAULT_SHARED_DIR = Path('./shared')
-
-def ensure_shared_folder(shared_dir: Path):
-    """
-    Ensures the shared folder exists.
-    If it doesn't it will be created.
-    """
-    if not isinstance(shared_dir, Path):
-        raise TypeError(f"path {shared_dir} is not a pathlib.Path.")
-    shared_dir.mkdir(exist_ok=True)
-    crinfodir = shared_dir.joinpath(FileInfo.CRINFO_DIR_NAME)
-    crinfodir.mkdir(exist_ok=True)
 
 def write_file(path: Path, data: bytes):
     """
@@ -36,6 +24,118 @@ def write_file(path: Path, data: bytes):
     with path.open('wb') as f:
         f.write(data)
 
+class SharedDirectory:
+    """
+    A shared directory instance.
+    - `dirpath`
+    - `crinfo_dirpath`
+    - `filemap`
+    """
+    CRINFO_DIRNAME = 'crinfo'
+
+    def __init__(self, path: Path):
+        """
+        Initialise the shared directory.
+        - `path`: A `Path` object with the path to the shared directory.
+        """
+        if not isinstance(path, Path):
+            raise TypeError(f"path \"{path}\" is not a pathlib.Path.")
+        
+        self.dirpath = path
+        self.crinfo_dirpath = path.joinpath(self.CRINFO_DIRNAME)
+        self.filemap:Dict[str, File] = {}
+
+        # Ensure the directory exists
+        self.dirpath.mkdir(exist_ok=True)
+        self.crinfo_dirpath.mkdir(exist_ok=True)
+        
+    def refresh(self):
+        """
+        Scans the local directory for new files.
+        - Any new files without a corresponding FileInfo will be processed.
+        - Any new FileInfos without a corresponding File will be processed.
+        """
+
+        # Scan shared directory
+        loaded_crinfos:List[Path] = []
+        for child in self.dirpath.iterdir():
+            if child.is_dir():
+                continue # ignore other directories
+
+            file = None
+            if child.suffix == f".{File.TEMP_FILE_EXT}":
+                try:
+                    # Add temp file
+                    file = File.from_temp_file(child)
+                    self.filemap[file.fileinfo.filename] = file
+                    logger.debug(f"{self.dirpath}: Loaded temp file from {child}")
+                except ValueError as e:
+                    logger.warning(f"Error loading from {child}: {str(e)}")
+                except FileError as e:
+                    logger.warning(f"Error loading from {child}: Corresponding FileInfo not found.")
+            else:
+                try:
+                    # Add actual file
+                    file = File.from_file(child)
+                    self.filemap[file.fileinfo.filename] = file
+                    logger.debug(f"{self.dirpath}: Loaded file from {child}")
+                except ValueError as e:
+                    logger.warning(f"Error loading from {child}: {str(e)}")
+            if file is None:
+                continue
+
+            loaded_crinfos.append(file.crinfo_filepath)
+        
+        # Scan CRINFO directory
+        for child in self.crinfo_dirpath.iterdir():
+            if child.is_dir() or child in loaded_crinfos:
+                continue
+            
+            # Generate empty tempfile
+            file = File.from_crinfo(child)
+            self.filemap[file.fileinfo.filename] = file
+            logger.debug(f"{self.dirpath}: Loaded empty file from {child}")
+
+    def add_file(self, filename: str, data: bytes):
+        """
+        Adds a new file to this directory, writing it to disk.
+        - This creates a corresponding FileInfo object.
+        - If the file already exists, it will be deleted along with its FileInfo object.
+        """
+        filepath = self.dirpath.joinpath(filename)
+        if filepath.is_file():
+            self.delete_file(filename)
+
+        with filepath.open('wb') as f:
+            f.write(data)
+        
+        file = File.from_file(filepath)
+        file.write_file()
+        self.filemap[filename] = file
+
+    def add_fileinfo(self, filename: str, data: bytes):
+        """
+        Adds a new FileInfo to this directory, writing it to disk.
+        - This creates the corresponding File in the parent directory (i.e. empty tempfile)
+        - `filename` should be the name of the actual file, not of the CRINFO file.
+        """
+        fileinfo = FileInfo._from_bytes(self, filename, data)
+        fileinfo.write()
+        file = File.from_crinfo(fileinfo.filepath)
+        file.write_temp_file()
+        self.filemap[filename] = file
+    
+    def delete_file(self, filename: str):
+        """
+        Deletes a file from this directory, and removing it from disk.
+        - This removes the corresponding FileInfo.
+        """
+        self.filemap.pop(filename, None)
+        filepath = self.dirpath.joinpath(filename)
+        crinfopath = self.crinfo_dirpath.joinpath(f"{filename}.{FileInfo.CRINFO_EXT}")
+        filepath.unlink(missing_ok=True)
+        crinfopath.unlink(missing_ok=True)
+
 class FileInfo:
     """
     Defines the file information associated with a file.
@@ -44,12 +144,13 @@ class FileInfo:
 
     # (MD5 output size) + (filename max size) + (int size) + (float size (for UTC timestamp))
     FILEINFO_MAX_LENGTH = 16 + FILENAME_MAX_LENGTH + 4 + 8
-    CRINFO_DIR_NAME = 'crinfo'
     CRINFO_EXT = 'crinfo'
 
-    def __init__(self, filehash: bytes, filename: str, filesize: int, timestamp: float=None):
+    def __init__(self, shareddir: SharedDirectory, filehash: bytes, filename: str, filesize: int, timestamp: float=None):
         if timestamp is None:
             timestamp = get_current_timestamp()
+        self.shareddir = shareddir
+        self.filepath = shareddir.crinfo_dirpath.joinpath(f"{filename}.{self.CRINFO_EXT}")
         self.filehash = filehash
         self.filename = filename
         self.filesize = filesize
@@ -80,55 +181,49 @@ class FileInfo:
     def __repr__(self) -> str:
         return f"{self.filename}: {self.filehash} ({self.filesize} B)."
     
-    def save_crinfo(self, shared_dir: Path=DEFAULT_SHARED_DIR) -> Path:
+    def write(self):
         """
-        Saves this `FileInfo` object on disk as a `.crinfo` file to `shared_dir/crinfo/`.
-        Returns the path to the saved CRINFO file.
+        Writes this `FileInfo` object to disk.
         """
-        ensure_shared_folder(shared_dir)
-        filepath = shared_dir.joinpath(self.CRINFO_DIR_NAME).joinpath(f"{self.filename}.{self.CRINFO_EXT}")
         line_1 = f"CRINFO {self.filesize} {self.timestamp}"
         data = line_1.encode('ascii') + b'\r\n' + self.filehash
-        write_file(filepath, data)
-        return filepath
+
+        write_file(self.filepath, data)
     
     @staticmethod
     def from_crinfo(path: Path) -> 'FileInfo':
         """
-        Generates a `FileInfo` object from a given CRINFO file name.
+        Generates a `FileInfo` object from a path to a CRINFO file.
         """
         if not path.suffix == f".{FileInfo.CRINFO_EXT}":
             raise ValueError(f"from_crinfo: Invalid CRINFO file ({path} has an invalid extension)")
         
         if not path.is_file():
             raise FileNotFoundError(f"from_crinfo: Invalid CRINFO file ({path} is not a file):")
+
         with path.open('rb') as f:
-            data_split = f.read().split(b'\r\n')
-            if len(data_split) != 2:
-                raise ValueError(f"from_crinfo: Invalid CRINFO file ({path} is an invalid file)")
-            
-            l1_split = data_split[0].decode('ascii').split(' ')
-            filehash = data_split[1]
-
-            if len(l1_split) != 3:
-                raise ValueError("from_crinfo: Invalid CRINFO file (Invalid first line)")
-            
-            filesig, filesize, timestamp = l1_split[0], int(l1_split[1]), float(l1_split[2])
-            if filesig != "CRINFO":
-                raise ValueError("from_crinfo: Invalid CRINFO file (Invalid file signature)")
-
+            data = f.read()
             filename = path.name.removesuffix(f'.{FileInfo.CRINFO_EXT}')
-            
-            return FileInfo(filehash, filename, filesize, timestamp)
-        
+            shareddir = SharedDirectory(path.parent.parent)
+            return FileInfo._from_bytes(shareddir, filename, data)
+
     @staticmethod
-    def from_data(filename: str, data: bytes) -> 'FileInfo':
-        """
-        Generates a `FileInfo` object from a given file in the form of bytes.
-        """
-        filehash = md5(data).digest()
-        filesize = len(data)
-        return FileInfo(filehash, filename, filesize)
+    def _from_bytes(shareddir: SharedDirectory, filename: str, data: bytes) -> 'FileInfo':
+        data_split = data.split(b'\r\n')
+        if len(data_split) != 2:
+            raise ValueError(f"from_crinfo: Invalid CRINFO data")
+        
+        l1_split = data_split[0].decode('ascii').split(' ')
+        filehash = data_split[1]
+
+        if len(l1_split) != 3:
+            raise ValueError("from_crinfo: Invalid CRINFO data (Invalid first line)")
+        
+        filesig, filesize, timestamp = l1_split[0], int(l1_split[1]), float(l1_split[2])
+        if filesig != "CRINFO":
+            raise ValueError("from_crinfo: Invalid CRINFO file (Invalid file signature)")
+        
+        return FileInfo(shareddir, filehash, filename, filesize, timestamp)
 
     @staticmethod
     def from_file(path: Path) -> 'FileInfo':
@@ -146,11 +241,12 @@ class FileInfo:
             raise ValueError("path provided not a file.")
         filename = path.name
         fileinfo = None
+        shared_dir = SharedDirectory(path.parent)
         with path.open('rb') as f:
-            fileinfo = FileInfo.from_data(
-                filename=filename,
-                data=f.read()
-            )
+            data = f.read()
+            filehash = md5(data).digest()
+            filesize = len(data)
+            fileinfo = FileInfo(shared_dir, filehash, filename, filesize)
         return fileinfo
 
 class Block:
@@ -200,7 +296,8 @@ class Block:
         """
         try:
             header, data = packet.split(b'\r\n\r\n', 1)
-            filehash, block_id_b = header.split(b' ', 1) # possible for block_id_b to contain \x20
+            filehash = header[:16]
+            block_id_b = header[17:]
             block_id = int.from_bytes(block_id_b, 'big')
             return Block(filehash, block_id, data)
         except ValueError:
@@ -232,19 +329,33 @@ class File:
     """
     TEMP_FILE_EXT = 'crtemp'
 
-    def __init__(self, fileinfo: FileInfo, shared_dir: Path=DEFAULT_SHARED_DIR):
+    def __init__(self, fileinfo: FileInfo):
         """
         Initialise an empty File object, associated with `fileinfo`.
+        - Shared Directory of `File` is inherited from the `FileInfo` object.
 
         This shouldn't be called directly when loading local files.
         """
         self.fileinfo = fileinfo
         self.blocks:List[Block] = []
-        self.shared_dir = shared_dir
+        self.shareddir = fileinfo.shareddir
+        self.crinfo_filepath = fileinfo.filepath
 
         # Initialise blocks list
         for i in range(self.fileinfo.block_count):
             self.blocks.append(Block(self.fileinfo.filehash, i))
+    
+    @property
+    def filepath(self) -> Path:
+        """
+        The path of this File on the disk.
+        """
+        shared_dir = self.shareddir.dirpath
+        
+        if self.downloaded:
+            return shared_dir.joinpath(f"{self.fileinfo.filename}")
+        else:
+            return shared_dir.joinpath(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT}")
 
     @property
     def downloaded_blockcount(self) -> int:
@@ -279,53 +390,50 @@ class File:
         Deletes a local copy of this file (temp or otherwise).
         Note: The `FileInfo` of this file will still exist!
         """
-        filepath:Path = self.shared_dir.joinpath(self.fileinfo.filename)
-        tempfilepath:Path = self.shared_dir.joinpath(self.fileinfo.filename + '.' + File.TEMP_FILE_EXT)
+        filepath:Path = self.shareddir.dirpath.joinpath(self.fileinfo.filename)
+        tempfilepath:Path = self.shareddir.dirpath.joinpath(self.fileinfo.filename + '.' + File.TEMP_FILE_EXT)
         
         filepath.unlink(missing_ok=True)
         tempfilepath.unlink(missing_ok=True)
 
-    def save_file(self) -> Path:
+    def write_file(self) -> Path:
         """
-        Saves this file. Returns the path of the file.
-        - This will automatically save the corresponding `FileInfo` in the shared folder of the file.
+        Writes this file to disk.
+        - This will automatically write the corresponding `FileInfo` to disk.
         - Raises a `FileError` if the file is not fully downloaded.
+        - This will OVERWRITE any existing file of the same path.
         """
-
-        shared_dir = self.shared_dir
 
         if not self.downloaded:
-            raise FileError("save_file Error: File not fully downloaded.")
+            raise FileError("write_file Error: File not fully downloaded.")
         
         # Save the fileinfo
         fileinfo = self.fileinfo
-        crinfo_file = fileinfo.save_crinfo(shared_dir)
-        logger.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
+        fileinfo.write()
+        logger.debug(f"CRINFO for {self.fileinfo.filename} written to disk.")
 
         data = b''.join([block.data for block in self.blocks])
-        path = shared_dir.joinpath(self.fileinfo.filename)
-        ensure_shared_folder(shared_dir)
-        write_file(path, data)
+        write_file(self.filepath, data)
         logger.info(f"{self.fileinfo.filename} written to directory.")
-        return path
+        return self.filepath
     
-    def save_temp_file(self) -> Path:
+    def write_temp_file(self) -> Path:
         """
-        Saves this TEMP file. Returns the path of the saved temporary file.
+        Write this TEMP file to disk. Returns the path of the saved temporary file.
         - This will automatically save the corresponding `FileInfo` in the shared folder of the file.
         - Raises a `FileError` if the file is fully downloaded.
+        - This will OVERWRITE any existing file of the same path.
 
         Refer to `README.md` for the documentation of a temp file.
         """
-        shared_dir = self.shared_dir
 
         if self.downloaded:
-            raise FileError("save_temp_file Error: File already fully downloaded.")
+            raise FileError("write_temp_file Error: File already fully downloaded.")
 
         # Save the fileinfo
         fileinfo = self.fileinfo
-        crinfo_file = fileinfo.save_crinfo(shared_dir)
-        logger.debug(f"CRINFO for {self.fileinfo.filename} saved as {crinfo_file}.")
+        fileinfo.write()
+        logger.debug(f"CRINFO for {self.fileinfo.filename} written to disk.")
 
         block_pointers:List[bytes] = []
         data = b'' 
@@ -342,14 +450,21 @@ class File:
         header = header_line_1 + b'\r\n' + b'\r\n'.join(block_pointers)
         full_data = header + b'\r\n\r\n' + data
 
-        path = shared_dir.joinpath(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT}")
-        ensure_shared_folder(shared_dir)
-        write_file(path, full_data)
+        write_file(self.filepath, full_data)
         logger.info(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT} written to directory.")
-        return path
+        return self.filepath
 
     def __repr__(self) -> str:
         return f"{self.fileinfo.filename}: {self.downloaded_blockcount}/{self.fileinfo.block_count} downloaded."
+    
+    @staticmethod
+    def from_crinfo(path: Path) -> 'File':
+        """
+        Loads an empty tempfile from a FileInfo `path`.
+        """
+        fileinfo = FileInfo.from_crinfo(path)
+        file = File(fileinfo)
+        return file
 
     @staticmethod
     def from_file(path: Path) -> 'File':
@@ -357,7 +472,6 @@ class File:
         Load a file from `path`. 
         - This will automatically load the FileInfo from the `crinfo` directory in the same directory, otherwise a new FileInfo \
             object is generated. (This is important, as the timestamp will change!)
-        - To get the default shared directory, you may need to import `DEFAULT_SHARED_DIR` from `util.files`.
         - A `ValueError` is raised if the given path is invalid.
         """
 
@@ -370,14 +484,14 @@ class File:
         # Get FileInfo header, if not create one.
         filedir = path.parent
         
-        fileinfo_filepath = filedir.joinpath(FileInfo.CRINFO_DIR_NAME).joinpath(f"{path.name}.{FileInfo.CRINFO_EXT}")
+        fileinfo_filepath = filedir.joinpath(SharedDirectory.CRINFO_DIRNAME).joinpath(f"{path.name}.{FileInfo.CRINFO_EXT}")
         fileinfo = None
         try:
             fileinfo = FileInfo.from_crinfo(fileinfo_filepath)
         except FileNotFoundError:
             fileinfo = FileInfo.from_file(path)
 
-        file = File(fileinfo, filedir)
+        file = File(fileinfo)
 
         # Populate blocks
         with path.open('rb') as f:
@@ -393,30 +507,29 @@ class File:
         Load a TEMP file from `path`. 
         - This will automatically load the FileInfo from the `crinfo` directory in the same directory, otherwise a `FileError` is \
             raised (Note the difference from `from_file()`.)
-        - To get the default shared directory, you may need to import `DEFAULT_SHARED_DIR` from `util.files`.
         - A `ValueError` is raised if the given path is invalid.
 
         Refer to `README.md` for the documentation of a temp file.
         """
 
         if path.suffix != f".{File.TEMP_FILE_EXT}":
-            raise ValueError(f"from_file: Invalid file ({path} is not a temp file)")
+            raise ValueError(f"from_temp_file: Invalid file ({path} is not a temp file)")
         
         if not path.is_file():
-            raise ValueError(f'from_file: Invalid file {path}.')
+            raise ValueError(f'from_temp_file: Invalid file {path}.')
         
         # Get FileInfo header, if not create one.
         filedir = path.parent
         filename_orig = path.name.removesuffix(f".{File.TEMP_FILE_EXT}")
         
-        fileinfo_filepath = filedir.joinpath(FileInfo.CRINFO_DIR_NAME).joinpath(f"{filename_orig}.{FileInfo.CRINFO_EXT}")
+        fileinfo_filepath = filedir.joinpath(SharedDirectory.CRINFO_DIRNAME).joinpath(f"{filename_orig}.{FileInfo.CRINFO_EXT}")
         fileinfo = None
         try:
             fileinfo = FileInfo.from_crinfo(fileinfo_filepath)
         except FileNotFoundError:
-            raise FileError("from_file: Given temp file has no corresponding CRINFO file.")
+            raise FileError("from_temp_file: Given temp file has no corresponding CRINFO file.")
 
-        file = File(fileinfo, filedir)
+        file = File(fileinfo)
 
         # Process file
         file_raw:bytes = b''
