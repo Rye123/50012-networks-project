@@ -82,7 +82,7 @@ class FileInfo:
     
     def save_crinfo(self, shared_dir: Path=DEFAULT_SHARED_DIR) -> Path:
         """
-        Saves this `FileInfo` object on disk as a `.crinfo` file.
+        Saves this `FileInfo` object on disk as a `.crinfo` file to `shared_dir/crinfo/`.
         Returns the path to the saved CRINFO file.
         """
         ensure_shared_folder(shared_dir)
@@ -228,6 +228,7 @@ class File:
     - `blocks`: List of blocks associated with the file.
     - `downloaded`: Whether or not this file is fully downloaded.
     - `shared_dir`: The directory that this file, along with its temp file version and fileinfo, should be stored in.
+    - `data`: The existing data of the file.
     """
     TEMP_FILE_EXT = 'crtemp'
 
@@ -265,6 +266,13 @@ class File:
             if not block.downloaded:
                 return False
         return True
+
+    @property
+    def data(self) -> bytes:
+        """
+        The concatenation of data in all blocks.
+        """
+        return b''.join([block.data for block in self.blocks])
 
     def delete_local_copy(self):
         """
