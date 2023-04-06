@@ -2,7 +2,7 @@ from hashlib import md5
 from pathlib import Path
 from ctp import CTPMessage, CTPMessageType
 from util import get_current_timestamp
-from typing import List
+from typing import List, Dict
 from math import ceil
 import logging
 
@@ -29,6 +29,7 @@ class SharedDirectory:
     A shared directory instance.
     - `dirpath`
     - `crinfo_dirpath`
+    - `filemap`
     """
     CRINFO_DIRNAME = 'crinfo'
 
@@ -61,6 +62,7 @@ class FileInfo:
         if timestamp is None:
             timestamp = get_current_timestamp()
         self.shareddir = shareddir
+        self.filepath = shareddir.crinfo_dirpath.joinpath(f"{filename}.{self.CRINFO_EXT}")
         self.filehash = filehash
         self.filename = filename
         self.filesize = filesize
@@ -97,9 +99,8 @@ class FileInfo:
         """
         line_1 = f"CRINFO {self.filesize} {self.timestamp}"
         data = line_1.encode('ascii') + b'\r\n' + self.filehash
-        crinfo_filepath = self.shareddir.crinfo_dirpath.joinpath(f"{self.filename}.{self.CRINFO_EXT}")
 
-        write_file(crinfo_filepath, data)
+        write_file(self.filepath, data)
     
     @staticmethod
     def from_crinfo(path: Path) -> 'FileInfo':
@@ -245,10 +246,23 @@ class File:
         self.fileinfo = fileinfo
         self.blocks:List[Block] = []
         self.shareddir = fileinfo.shareddir
+        self.crinfo_filepath = fileinfo.filepath
 
         # Initialise blocks list
         for i in range(self.fileinfo.block_count):
             self.blocks.append(Block(self.fileinfo.filehash, i))
+    
+    @property
+    def filepath(self) -> Path:
+        """
+        The path of this File on the disk.
+        """
+        shared_dir = self.shareddir.dirpath
+        
+        if self.downloaded:
+            return shared_dir.joinpath(f"{self.fileinfo.filename}")
+        else:
+            return shared_dir.joinpath(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT}")
 
     @property
     def downloaded_blockcount(self) -> int:
@@ -295,7 +309,6 @@ class File:
         - This will automatically write the corresponding `FileInfo` to disk.
         - Raises a `FileError` if the file is not fully downloaded.
         """
-        shared_dir = self.shareddir.dirpath
 
         if not self.downloaded:
             raise FileError("write_file Error: File not fully downloaded.")
@@ -306,10 +319,9 @@ class File:
         logger.debug(f"CRINFO for {self.fileinfo.filename} written to disk.")
 
         data = b''.join([block.data for block in self.blocks])
-        path = shared_dir.joinpath(self.fileinfo.filename)
-        write_file(path, data)
+        write_file(self.filepath, data)
         logger.info(f"{self.fileinfo.filename} written to directory.")
-        return path
+        return self.filepath
     
     def write_temp_file(self) -> Path:
         """
@@ -319,7 +331,6 @@ class File:
 
         Refer to `README.md` for the documentation of a temp file.
         """
-        shared_dir = self.shareddir.dirpath
 
         if self.downloaded:
             raise FileError("write_temp_file Error: File already fully downloaded.")
@@ -344,10 +355,9 @@ class File:
         header = header_line_1 + b'\r\n' + b'\r\n'.join(block_pointers)
         full_data = header + b'\r\n\r\n' + data
 
-        path = shared_dir.joinpath(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT}")
-        write_file(path, full_data)
+        write_file(self.filepath, full_data)
         logger.info(f"{self.fileinfo.filename}.{self.TEMP_FILE_EXT} written to directory.")
-        return path
+        return self.filepath
 
     def __repr__(self) -> str:
         return f"{self.fileinfo.filename}: {self.downloaded_blockcount}/{self.fileinfo.block_count} downloaded."
@@ -358,7 +368,6 @@ class File:
         Load a file from `path`. 
         - This will automatically load the FileInfo from the `crinfo` directory in the same directory, otherwise a new FileInfo \
             object is generated. (This is important, as the timestamp will change!)
-        - To get the default shared directory, you may need to import `DEFAULT_SHARED_DIR` from `util.files`.
         - A `ValueError` is raised if the given path is invalid.
         """
 
@@ -394,7 +403,6 @@ class File:
         Load a TEMP file from `path`. 
         - This will automatically load the FileInfo from the `crinfo` directory in the same directory, otherwise a `FileError` is \
             raised (Note the difference from `from_file()`.)
-        - To get the default shared directory, you may need to import `DEFAULT_SHARED_DIR` from `util.files`.
         - A `ValueError` is raised if the given path is invalid.
 
         Refer to `README.md` for the documentation of a temp file.
