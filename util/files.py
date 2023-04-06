@@ -161,26 +161,30 @@ class FileInfo:
         
         if not path.is_file():
             raise FileNotFoundError(f"from_crinfo: Invalid CRINFO file ({path} is not a file):")
+
         with path.open('rb') as f:
-            data_split = f.read().split(b'\r\n')
-            if len(data_split) != 2:
-                raise ValueError(f"from_crinfo: Invalid CRINFO file ({path} is an invalid file)")
-            
-            l1_split = data_split[0].decode('ascii').split(' ')
-            filehash = data_split[1]
-
-            if len(l1_split) != 3:
-                raise ValueError("from_crinfo: Invalid CRINFO file (Invalid first line)")
-            
-            filesig, filesize, timestamp = l1_split[0], int(l1_split[1]), float(l1_split[2])
-            if filesig != "CRINFO":
-                raise ValueError("from_crinfo: Invalid CRINFO file (Invalid file signature)")
-
+            data = f.read()
             filename = path.name.removesuffix(f'.{FileInfo.CRINFO_EXT}')
-
             shareddir = SharedDirectory(path.parent.parent)
-            
-            return FileInfo(shareddir, filehash, filename, filesize, timestamp)
+            return FileInfo._from_bytes(shareddir, filename, data)
+
+    @staticmethod
+    def _from_bytes(shareddir: SharedDirectory, filename: str, data: bytes) -> 'FileInfo':
+        data_split = data.split(b'\r\n')
+        if len(data_split) != 2:
+            raise ValueError(f"from_crinfo: Invalid CRINFO data")
+        
+        l1_split = data_split[0].decode('ascii').split(' ')
+        filehash = data_split[1]
+
+        if len(l1_split) != 3:
+            raise ValueError("from_crinfo: Invalid CRINFO data (Invalid first line)")
+        
+        filesig, filesize, timestamp = l1_split[0], int(l1_split[1]), float(l1_split[2])
+        if filesig != "CRINFO":
+            raise ValueError("from_crinfo: Invalid CRINFO file (Invalid file signature)")
+        
+        return FileInfo(shareddir, filehash, filename, filesize, timestamp)
 
     @staticmethod
     def from_file(path: Path) -> 'FileInfo':
