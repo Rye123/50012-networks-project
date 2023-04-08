@@ -61,7 +61,7 @@ if __name__ == "__main__":
     peer = setup_peer(this_peer_id)
 
     peer.listen()
-    print("\n\nPeer has been set up.\nCommands:\n\tSCAN: Scan local directory for new files\n\tSYNC PEERS: Sync peers with the bootstrapped peerlist\n\tSYNC FILES: Syncs files with peers\n\tEXIT: Exit. Duh.")
+    print("\n\nPeer has been set up.\nCommands:\n\tSCAN: Scan local directory for new files\n\tSYNC PEERS: Sync peers with the bootstrapped peerlist\n\tSYNC FILES: Syncs files with peers\n\tSHARE: Share file with cluster\n\tEXIT: Exit. Duh.")
 
 
 
@@ -85,6 +85,10 @@ if __name__ == "__main__":
                     print("SYNC FILES: Syncing files.")
                     peer.sync_files()
                     print("SYNC FILES: Files synced.")
+                case "SHARE":
+                    print("SHARE: Sharing files with cluster.")
+                    peer.share_files()
+                    print("SHARE: Files shared.")
                 case "SCAN":
                     print("SCAN: Updating files from local directory...")
                     peer.scan_local_dir()

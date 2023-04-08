@@ -195,7 +195,33 @@ class Peer(CTPPeer):
         This should share the given file's `FileInfo` object with the entire \
         cluster
         """
-        pass
+        if not file.downloaded:
+            raise ValueError("Given file is not fully downloaded.")
+        
+        fileinfo_b = b''
+        with file.fileinfo.filepath.open('rb') as f:
+            fileinfo_b = f.read()
+        formatted_data = file.fileinfo.filename.encode('ascii') + b'\r\n\r\n' + fileinfo_b
+
+        response = self.send_request_to_server(
+            CTPMessageType.NEW_CRINFO_NOTIF,
+            formatted_data,
+            1
+        )
+
+        if response is None:
+            return
+        
+        if response.data == b"success":
+            # Send a follow-up asking for the updated manifest.
+            response_2 = self.send_request_to_server(
+                CTPMessageType.MANIFEST_REQUEST,
+                b''
+            )
+            print(response_2)
+            # TODO: work with the response
+        elif response.data == b"error: exists":
+            print("file alr shared")
 
     def listen(self):
         """
@@ -234,6 +260,17 @@ class Peer(CTPPeer):
         peer_index = context.get("counter", 0) % len(self.peermap)
         peer_id = list(self.peermap.keys())[peer_index]
         return self.peermap.get(peer_id)
+    
+    def share_files(self):
+        """
+        Shares all shareable files with the server.
+
+        TODO: for now this shares ALL downloaded files, we don't actually want that.
+        - Need to find a way to indicate 'ownership'.
+        """
+        filelist = [f for f in self.shareddir.filemap.values() if (f.downloaded)]
+        for file in filelist:
+            self.share(file)
 
     def sync_files(self):
         """

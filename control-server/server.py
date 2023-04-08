@@ -14,11 +14,11 @@ sys.path.insert(0, path)
 from ctp import CTPPeer, RequestHandler, Listener
 from ctp import CTPMessage, CTPMessageType, CTPConnectionError, AddressType
 from util import FileInfo, File, FileError, Block
-from util import ensure_shared_folder, standardHandler
+from util import standardHandler, SharedDirectory
 
 # Logging Settings
 APP_LOGGING_LEVEL = logging.DEBUG
-CTP_LOGGING_LEVEL = logging.DEBUG # Recieve only warnings from CTP.
+CTP_LOGGING_LEVEL = logging.WARNING # Recieve only warnings from CTP.
 UTIL_LOGGING_LEVEL = logging.WARNING # Receive only warnings from util
 
 logger = logging.getLogger()
@@ -153,17 +153,42 @@ class ServerRequestHandler(RequestHandler):
         )
 
     def handle_new_crinfo_notif(self, request: CTPMessage):
-        pass
+        # Request contains the new CRINFO file in bytes.
+        try:
+            filename_b, crinfo_b = request.data.split(b'\r\n\r\n', 1)
+            filename = filename_b.decode('ascii')
+            fileinfo = FileInfo._from_bytes(self.peer.shareddir, filename, crinfo_b)
+            response_data_b = b''
+            if fileinfo not in self.peer.fileinfo_map.values():
+                self.peer.add_fileinfo(fileinfo)
+                logger.info(f"Added new CRINFO of {filename}")
+                response_data_b = b'success'
+            else:
+                logger.info(f"CRINFO already exists.")
+                response_data_b = b'error: exists'
+                
+            self.send_response(
+                CTPMessageType.NEW_CRINFO_NOTIF_ACK,
+                response_data_b
+            )
+        except ValueError:
+            # return an error message
+            self.send_response(
+                CTPMessageType.INVALID_REQ,
+                b"error: corrupted CRINFO file or filename"
+            )
 
     def handle_manifest_request(self, request: CTPMessage):
-        # Get the file manifest CRINFO in bytes
-        data = b''
-        # with self.peer.manifest_path.parent.joinpath("crinfo/.crmanifest.crinfo").open('rb') as f:
-        #     data = f.read()
+        """
+        Return the manifest CRINFO file.
+        """
+        manifest_crinfo_b = b''
+        with self.peer.get_manifest_crinfo().filepath.open('rb') as f:
+            manifest_crinfo_b = f.read()
 
         self.send_response(
             CTPMessageType.MANIFEST_RESPONSE,
-            data
+            manifest_crinfo_b
         )
 
     def handle_crinfo_request(self, request: CTPMessage):
@@ -175,6 +200,14 @@ class ServerRequestHandler(RequestHandler):
     def handle_unknown_request(self, request: CTPMessage):
         self.send_response(CTPMessageType.UNEXPECTED_REQ, b'unknown request')
 
+class ServerError(Exception):
+    """
+    Generic server error.
+    """
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
 class Server(CTPPeer):
     """
     CTP Server.
@@ -183,25 +216,24 @@ class Server(CTPPeer):
     overwritten.
     - `clusters`: A dictionary linking a `cluster_id` to the `Cluster` object.
     """
-    def __init__(self, address: AddressType):
+    FILE_MANIFEST_FILENAME = ".crmanifest"
+
+    def __init__(self, address: AddressType, shared_dir_path: Path):
         if not isinstance(address, Tuple):
             if not isinstance(address[0], str) or not isinstance(address[1], int):
                 raise TypeError("Invalid address: address should be a tuple of an IP address and a port.")
         self.peer_id = SERVER_PEER_ID
         self.short_peer_id = SERVER_PEER_ID[:6]
         self.clusters:Dict[str, Cluster] = {}
-
         self.cluster_id = None
 
-        # self.fileinfo_map:Dict[str, FileInfo] = {} # maps filename to FileInfo object
-        # self.manifest_path = Path("./control-server/manifest/.crmanifest")
-        # if not self.manifest_path.is_file():
-        #     # Create file
-        #     with self.manifest_path.open('wb') as f:
-        #         f.write(b'')
-        # self.server_path = Path("./control-server/")
-        # self.file_manifest:File = File.from_file(self.manifest_path)
-        # self._parse_manifest()
+        self.fileinfo_map:Dict[str, FileInfo] = {} # maps filename to FileInfo object
+        self.shareddir = SharedDirectory(shared_dir_path)
+        manifest_path = shared_dir_path.joinpath("manifest")
+        self.manifestdir = SharedDirectory(manifest_path)
+        self.shareddir.refresh()
+        self.manifestdir.refresh()
+        self._parse_manifest()
 
         self.requestHandlerClass = ServerRequestHandler
         self.peer_addr = address
@@ -224,49 +256,62 @@ class Server(CTPPeer):
         self.clusters[cluster_id] = new_cluster
     
     def add_fileinfo(self, fileinfo: FileInfo):
-        pass
-        # self.fileinfo_map[fileinfo.filename] = fileinfo
-        # path = fileinfo.save_crinfo(self.manifest_path)
-        # logger.info(f"Saved {fileinfo.filename} to {path}.")
-        # self._update_manifest()
+        self.fileinfo_map[fileinfo.filename] = fileinfo
+        fileinfo.write()
+        logger.info(f"Saved {fileinfo.filename} fileinfo.")
+        self._update_manifest()
+
+    def get_manifest_crinfo(self) -> FileInfo:
+        """
+        Returns the CRINFO of the manifest file on the server.
+        """
+        self._update_manifest()
+        return self.manifestdir.filemap.get(self.FILE_MANIFEST_FILENAME).fileinfo
 
     def _update_manifest(self):
         """
         Updates the server's local file manifest based on the current list of FileInfos.
-        
-        TODO: refactor util.files.File to allow us to use it in a more sensible manner
         """
-        pass
-        # filenames = sorted(self.fileinfo_map.keys())
-        # manifest_bytes = ('\r\n'.join(filenames)).encode('ascii')
-        # with self.manifest_path.open('wb') as f:
-        #     f.write(manifest_bytes)
-        # logger.info(f"Updated stored manifest.")
-        # self.file_manifest = File.from_file(self.manifest_path)
-        # self.file_manifest.save_file() # save the corresponding fileinfo
+        filenames = sorted(self.fileinfo_map.keys())
+        print(filenames)
+        manifest_bytes = ('\r\n'.join(filenames)).encode('ascii')
+        self.manifestdir.add_file(self.FILE_MANIFEST_FILENAME, manifest_bytes)
+
+        logger.info(f"Updated stored manifest.")
 
     def _parse_manifest(self):
         """
         Overwrites in-memory `fileinfo_map` with the local manifest.
-
-        TODO: refactor util.files.File to allow us to use it in a more sensible manner
         """
-        pass
-        # data = self.file_manifest.data.decode('ascii')
-        # filenames:List[str] = data.split('\r\n')
-        # for filename in filenames:
-        #     filename = filename.strip()
-        #     if len(filename) == 0:
-        #         continue
-        #     path = self.server_path.joinpath(f"crinfo/{filename}")
-        #     self.fileinfo_map[filename] = FileInfo.from_crinfo(path)
-        # logger.info(f"Loaded {len(self.fileinfo_map)} FileInfo objects.")
-        # self.manifest_path.parent.joinpath("crinfo/.crmanifest.crinfo").unlink()
-        # self.file_manifest.delete_local_copy()
-        # self.file_manifest.save_file() # To auto-save the corresponding CRINFO of the file manifest.
+        logger.info("Parsing stored manifest...")
+        # If file already exists, set it.
+        manifest_file = self.manifestdir.filemap.get(self.FILE_MANIFEST_FILENAME, None)
+
+        # Otherwise, create it
+        if manifest_file is None:
+            logger.debug("No existing manifest, creating one.")
+            self.manifestdir.add_file(self.FILE_MANIFEST_FILENAME, b'')
+            manifest_file = self.manifestdir.filemap.get(self.FILE_MANIFEST_FILENAME, None)
+
+            # if it's still None let's just quit while we're still ahead
+            if manifest_file is None:
+                raise ServerError("Manifest File could not be created.")
+
+        # Now, overwrite.
+        data = manifest_file.data.decode('ascii')
+        filenames:List[str] = data.split('\r\n')
+        for filename in filenames:
+            filename = filename.strip()
+            if len(filename) == 0:
+                continue
+            path = self.shareddir.crinfo_dirpath.joinpath(filename)
+            self.fileinfo_map[filename] = FileInfo.from_crinfo(path.with_suffix(path.suffix + f".{FileInfo.CRINFO_EXT}"))
+        logger.info(f"Loaded {len(self.fileinfo_map)} FileInfo objects.")
+
+        manifest_file.write_file()
 
 if __name__ == "__main__":
-    server = Server(DEFAULT_SERVER_ADDRESS)
+    server = Server(DEFAULT_SERVER_ADDRESS, Path('./control-server/data'))
     try:
         server.add_cluster("3f80e91dc65311ed93abeddb088b3faa")
 

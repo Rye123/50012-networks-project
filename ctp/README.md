@@ -121,8 +121,8 @@ The above API abstracts away the handling of socket sending and receiving of the
 | `MANIFEST_RESPONSE`     | `0000 1001`        | Response containing the manifest `CRINFO` file. This file contains a list of filenames in the cluster. |
 | `CRINFO_REQUEST`        | `0000 1010`        | Request a specific file's `CRINFO`. Data in ASCII, `filename: ...`.                                    |
 | `CRINFO_RESPONSE`       | `0000 1011`        | Response containing the file's `CRINFO`. Data in bytes.                                                |
-| `NEW_CRINFO_NOTIF`      | `0000 1100`        | 'Request' giving the server a new `CRINFO` file.                                                       |
-| `NEW_CRINFO_ACK`        | `0000 1101`        | Response returning the updated manifest `CRINFO`.                                                      |
+| `NEW_CRINFO_NOTIF`      | `0000 1100`        | 'Request' giving the server a new `CRINFO` file. Filename is first, followed by `b\r\n\r\n` before the actual file is sent in bytes.                                                       |
+| `NEW_CRINFO_ACK`        | `0000 1101`        | Response indicating successful receipt of the `CRINFO`. If the file already exists, the response is a message in ASCII `"error: exists"`. Otherwise, the message will be `"success"`.                                                      |
 | `INVALID_REQUEST`       | `1111 1101`        | Response regarding an invalid request (client-side error).                                             |
 | `NO_OP`                 | `1111 1110`        | A request that expects no response.                                                                    |
 | `UNEXPECTED_REQ`        | `1111 1111`        | Response stating that a given request was unexpected or unsupported. Error message will be ASCII.      |
@@ -163,8 +163,8 @@ Depends on message type:
 - `CRINFO_REQUEST`: Request a `CRINFO` file from the server. A peer might do this after receiving an updated manifest. 
   - `data` contains the filename to request.
 - `CRINFO_RESPONSE`: Returns the `CRINFO` file corresponding to the filename.
-- `NEW_CRINFO_NOTIF`: Send a `CRINFO` file to the server.
-- `NEW_CRINFO_NOTIF_ACK`: Acknowledge the sent `CRINFO` file, by returning the updated file manifest `CRINFO`.
+- `NEW_CRINFO_NOTIF`: Send a `CRINFO` file to the server. This file in bytes is prepended with `{filename}\r\n\r\n` in bytes.
+- `NEW_CRINFO_NOTIF_ACK`: Acknowledge the sent `CRINFO` file. The requester should then send a manifest request to request the updated manifest, if the response message was not `"error: exists"`.
 - `INVALID_REQUEST`: A response indicating a client-side error. (ASCII)
   - `data` contains the error.
 - `NO_OP`: A request that expects no response. (ASCII).
