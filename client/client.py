@@ -317,7 +317,12 @@ class Peer(CTPPeer):
         # Use the currently stored version.
         with manifest_file.filepath.open('rb') as f:
             header, data = f.read().decode('ascii').split('\r\n\r\n', 1)
-            filenames = data.split('\r\n')
+            filenames_raw = data.split('\r\n')
+            # Ensure no empty filenames
+            filenames = []
+            for filename in filenames_raw:
+                if len(filename.strip()) != 0:
+                    filenames.append(filename)
             self.manifest_filelist = filenames
         logger.debug("Manifest parsed.")
 
