@@ -108,23 +108,28 @@ class ServerRequestHandler(RequestHandler):
         self.peer._log("debug", f"Responded with {response.msg_type.name}.")
     
     def handle(self, request: CTPMessage):
-        match request.msg_type:
-            case CTPMessageType.STATUS_REQUEST:
-                self.handle_status_request(request)
-            case CTPMessageType.BLOCK_REQUEST:
-                self.handle_block_request(request)
-            case CTPMessageType.CLUSTER_JOIN_REQUEST:
-                self.handle_cluster_join_request(request)
-            case CTPMessageType.MANIFEST_REQUEST:
-                self.handle_manifest_request(request)
-            case CTPMessageType.CRINFO_RESPONSE:
-                self.handle_crinfo_request(request)
-            case CTPMessageType.NEW_CRINFO_NOTIF:
-                self.handle_new_crinfo_notif(request)
-            case CTPMessageType.NO_OP:
-                self.handle_no_op(request)
-            case _:
-                self.handle_unknown_request(request)
+        try:
+            match request.msg_type:
+                case CTPMessageType.STATUS_REQUEST:
+                    self.handle_status_request(request)
+                case CTPMessageType.BLOCK_REQUEST:
+                    self.handle_block_request(request)
+                case CTPMessageType.CLUSTER_JOIN_REQUEST:
+                    self.handle_cluster_join_request(request)
+                case CTPMessageType.MANIFEST_REQUEST:
+                    self.handle_manifest_request(request)
+                case CTPMessageType.CRINFO_RESPONSE:
+                    self.handle_crinfo_request(request)
+                case CTPMessageType.NEW_CRINFO_NOTIF:
+                    self.handle_new_crinfo_notif(request)
+                case CTPMessageType.NO_OP:
+                    self.handle_no_op(request)
+                case _:
+                    self.handle_unknown_request(request)
+        except Exception as e:
+            logger.error(str(e))
+            if request.msg_type != CTPMessageType.NO_OP:
+                self.send_response(CTPMessageType.SERVER_ERROR, b'')
     
     def handle_status_request(self, request: CTPMessage):
         self.send_response(CTPMessageType.STATUS_RESPONSE, b'status: 1')
