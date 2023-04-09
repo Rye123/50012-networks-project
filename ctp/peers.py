@@ -7,12 +7,14 @@ from queue import Queue, Empty
 from typing import Any, Type, List, Callable, Tuple
 from time import sleep
 from traceback import format_exc
+from random import randint
 
 from ctp.ctp import CTPMessage, CTPMessageType, InvalidCTPMessageError
 from ctp.ctp import PLACEHOLDER_CLUSTER_ID, PLACEHOLDER_SENDER_ID
 
 AddressType = Tuple[str, int]
 ENCODING = 'ascii'
+MAX_INT_VALUE = (2**32) - 1 # max int to fit in 4 bytes
 logger = logging.getLogger(__name__)
 
 class RequestHandler(ABC):
@@ -24,15 +26,20 @@ class RequestHandler(ABC):
     - `self.client_addr`: The request sender's address
     - `self.request`: The actual request
 
-    This class has several abstract methods that should be \
-        implemented, these provide functionality to handle given requests. \
-            We almost always want to respond to the request, since the \
-                client's default state is to wait for a response. 
+    This class has several methods that should be implemented, these provide \
+    functionality to handle given requests. \
     - `cleanup()`
     - `handle_status_request(request)`
     - `handle_notification(request)`
     - `handle_block_request(request)`
     - `handle_unknown_request(request)`.
+
+    In general, these should be implemented since the requester **expects** a response for these.
+    - If not overwritten, the default response is an `UNEXPECTED_REQ` response.
+    - Note that the `NO_OP` message does not expect a response.
+
+    If necessary (e.g. implementing a server), the `handle` method can be overwritten to support \
+    more functions.
 
     An example implementation is the `DefaultRequestHandler`.
     """
@@ -43,7 +50,16 @@ class RequestHandler(ABC):
         self.peer = peer
         self.client_addr = client_addr
         self.request = request
-        self.peer._log("info", f"Received {request.msg_type.name} from {client_addr}.")
+        self.handle(request)
+        self.cleanup()
+    
+    def handle(self, request: CTPMessage):
+        """
+        Handles a given request.
+
+        This can be overwritten if we're expecting more requests
+        """
+        self.peer._log("info", f"Received {request.msg_type.name} from {self.client_addr}.")
         match request.msg_type:
             case CTPMessageType.STATUS_REQUEST:
                 self.handle_status_request(request)
@@ -55,7 +71,6 @@ class RequestHandler(ABC):
                 self.handle_no_op(request)
             case _:
                 self.handle_unknown_request(request)
-        self.cleanup()
     
     def close(self):
         """
@@ -71,9 +86,14 @@ class RequestHandler(ABC):
         """
         if not isinstance(msg_type, CTPMessageType) or msg_type.is_request():
             raise ValueError("Invalid msg_type: msg_type should be a CTPMessageType and a response.")
+
+        # Protocol: Increment request sequence number by 1 and return as new sequence number
+        req_seqnum = self.request.seqnum
+        resp_seqnum = req_seqnum + 1
         
         response = CTPMessage(
             msg_type,
+            resp_seqnum,
             data,
             self.peer.cluster_id,
             self.peer.peer_id
@@ -81,39 +101,34 @@ class RequestHandler(ABC):
         self.peer._send_message(response, self.client_addr)
         self.peer._log("debug", f"Responded with {response.msg_type.name}.")
     
-    @abstractmethod
     def cleanup(self):
         """
         Handles the cleanup after a request.
         Most of the time, we want to end the interaction, which can be done with the `.close()` method.
         """
-        pass
+        self.close()
     
-    @abstractmethod
     def handle_status_request(self, request: CTPMessage):
         """
         Handles a `STATUS_REQUEST`.
         This should send an appropriate `STATUS_RESPONSE`, with the `send_response` method.
         """
-        pass
+        self.send_response(CTPMessageType.STATUS_RESPONSE, b'status: 1')
     
-    @abstractmethod
     def handle_notification(self, request: CTPMessage):
         """
         Handles a `NOTIFICATION`.
         This should send an appropriate `NOTIFICATION_ACK`, with the `send_response` method.
         """
-        pass
+        self.send_response(CTPMessageType.UNEXPECTED_REQ, b'not implemented')
 
-    @abstractmethod
     def handle_block_request(self, request: CTPMessage):
         """
         Handles a `BLOCK_REQUEST`.
         This should send an appropriate `BLOCK_RESPONSE`, with the `send_response` method.
         """
-        pass
+        self.send_response(CTPMessageType.UNEXPECTED_REQ, b'not implemented')
     
-    @abstractmethod
     def handle_no_op(self, request: CTPMessage):
         """
         Handles a `NO_OP`.
@@ -121,14 +136,13 @@ class RequestHandler(ABC):
         """
         pass
     
-    @abstractmethod
     def handle_unknown_request(self, request: CTPMessage):
         """
         Handle an unknown request.
         We shouldn't be able to reach this point, but if there's a request defined in the future \
             that isn't handled by the above methods, it will be handled here.
         """
-        pass
+        self.send_response(CTPMessageType.UNEXPECTED_REQ, b'unknown request')
 
 class DefaultRequestHandler(RequestHandler):
     """
@@ -193,7 +207,7 @@ class Listener:
         """
         self._stop_listening.set()
     
-    def get_response(self, expected_addr: AddressType=None, expected_type: CTPMessageType=None, block_time: int=1.0) -> CTPMessage:
+    def get_response(self, expected_seqnum: int, block_time: int=1.0) -> CTPMessage:
         """
         Checks the listener for a response. Blocks for at least `block_time` until the response is returned.
         - Returns the response, or None.
@@ -206,9 +220,7 @@ class Listener:
         with self._responses.mutex:
             for tup in self._responses.queue:
                 response, addr = tup
-                if (expected_addr is None and expected_type == response.msg_type) \
-                    or (expected_addr == addr and expected_type is None) \
-                    or (expected_addr == addr and expected_type == response.msg_type):
+                if (expected_seqnum == response.seqnum):
                     self._responses.queue.remove(tup)
                     return response
         # Add watch signal to the response_signal
@@ -223,10 +235,7 @@ class Listener:
                 with self._responses.mutex:
                     for tup in self._responses.queue:
                         response, addr = tup
-                        if (expected_addr is None and expected_type == response.msg_type) \
-                            or (expected_addr == addr and expected_type is None) \
-                            or (expected_addr == addr and expected_type == response.msg_type):
-                            timer.cancel()
+                        if (expected_seqnum == response.seqnum):
                             self._responses.queue.remove(tup)
                             return response
         # Timeout, gg
@@ -357,7 +366,8 @@ class CTPPeer:
             if not isinstance(dest_addr[0], str) or not isinstance(dest_addr[1], int):
                 raise TypeError("Invalid dest_addr: dest_addr should be a tuple of an IP address and a port.")
 
-        message = CTPMessage(msg_type, data, self.cluster_id, self.peer_id)
+        seqnum = randint(0, MAX_INT_VALUE)
+        message = CTPMessage(msg_type, seqnum, data, self.cluster_id, self.peer_id)
         
         self._log("info", f"Sending {msg_type.name} to {dest_addr}.")
         
@@ -370,21 +380,11 @@ class CTPPeer:
             try:
                 self._send_message(message, dest_addr)
                 response = None
-                expected_response_type = None
-                match message.msg_type:
-                    case CTPMessageType.STATUS_REQUEST:
-                        expected_response_type = CTPMessageType.STATUS_RESPONSE
-                    case CTPMessageType.NOTIFICATION:
-                        expected_response_type = CTPMessageType.NOTIFICATION_ACK
-                    case CTPMessageType.BLOCK_REQUEST:
-                        expected_response_type = CTPMessageType.BLOCK_RESPONSE
-                if expected_response_type is None:
-                    # Return none if msg_type doesn't match any, i.e. no response expected
+                if message.msg_type == CTPMessageType.NO_OP or message.msg_type == CTPMessageType.PEERLIST_PUSH: # we expect no response
                     return None
                 
                 response = self.listener.get_response(
-                    expected_addr=dest_addr,
-                    expected_type=expected_response_type,
+                    expected_seqnum=seqnum+1,
                     block_time=timeout
                 )
                 if response is None:

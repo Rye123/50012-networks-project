@@ -7,6 +7,7 @@ from random import randint
 from hashlib import md5
 
 TEST_FILE_DIR_PATH = Path("./tests/util_tests/test_files")
+TEST_SHARED_DIR_PATH = Path("./tests/util_tests/test_shared_dir")
 
 
 def copy_dir(src_dir: Path, tgt_dir: Path):
@@ -85,7 +86,7 @@ class TestFileInfo(unittest.TestCase):
 
     def test_crinfo_loading(self):
         fileinfo1 = FileInfo.from_file(self.get_test_filepath('huge_text_file.txt'))
-        fileinfo1.save_crinfo(self.test_dir)
+        fileinfo1.write()
         fileinfo2 = FileInfo.from_crinfo(self.get_test_filepath(f"crinfo/huge_text_file.txt.crinfo"))
 
         self.assertEqual(fileinfo1.filename, fileinfo2.filename)
@@ -114,9 +115,9 @@ class TestFile(unittest.TestCase):
         self.filename = "bee.txt"
         filename = "bee.txt"
         file = File.from_file(self.get_test_filepath(filename))
-
+        
         # Temp file 1: Empty temp file
-        temp_file_1 = File(file.fileinfo, self.test_dir)
+        temp_file_1 = File(file.fileinfo)
         temp_file_1.__temp_type = "Empty Temp File"
         self.temp_files.append(temp_file_1)
 
@@ -124,7 +125,7 @@ class TestFile(unittest.TestCase):
         blocks_2 = deepcopy(file.blocks)
         blocks_2[0].data = b''
         blocks_2[0].downloaded = False
-        temp_file_2 = File(file.fileinfo, self.test_dir)
+        temp_file_2 = File(file.fileinfo)
         temp_file_2.__temp_type = "File with first block missing"
         temp_file_2.blocks = blocks_2
         self.temp_files.append(temp_file_2)
@@ -133,7 +134,7 @@ class TestFile(unittest.TestCase):
         blocks_3 = deepcopy(file.blocks)
         blocks_3[-1].data = b''
         blocks_3[-1].downloaded = False
-        temp_file_3 = File(file.fileinfo, self.test_dir)
+        temp_file_3 = File(file.fileinfo)
         temp_file_3.__temp_type = "File with last block missing"
         temp_file_3.blocks = blocks_3
         self.temp_files.append(temp_file_3)
@@ -143,7 +144,7 @@ class TestFile(unittest.TestCase):
         chosen_index = randint(0, len(blocks_4)-1)
         blocks_4[chosen_index].data = b''
         blocks_4[chosen_index].downloaded = False
-        temp_file_4 = File(file.fileinfo, self.test_dir)
+        temp_file_4 = File(file.fileinfo)
         temp_file_4.__temp_type = "File with arbitrary block missing"
         temp_file_4.blocks = blocks_4
         self.temp_files.append(temp_file_4)
@@ -155,19 +156,29 @@ class TestFile(unittest.TestCase):
             chosen_index = randint(0, len(blocks_5)-1)
             blocks_5[chosen_index].data = b''
             blocks_5[chosen_index].downloaded = False
-        temp_file_5 = File(file.fileinfo, self.test_dir)
+        temp_file_5 = File(file.fileinfo)
         temp_file_5.__temp_type = "File with random number of arbitrary blocks missing"
         temp_file_5.blocks = blocks_5
         self.temp_files.append(temp_file_5)
 
+        # Temp file 6: File with all blocks missing
+        blocks_6 = deepcopy(file.blocks)
+        for i in range(len(blocks_6)):
+            blocks_6[i].data = b''
+            blocks_6[i].downloaded = False
+        temp_file_6 = File(file.fileinfo)
+        temp_file_6.__temp_type = "File with all blocks missing"
+        temp_file_6.blocks = blocks_6
+        self.temp_files.append(temp_file_6)
+
         for temp_file in self.temp_files:
-            pathstr = temp_file.save_temp_file()
+            pathstr = temp_file.write_temp_file()
 
     def test_file_info_preserved_from_file(self):
         filename = 'huge_text_file.txt'
         file = File.from_file(self.get_test_filepath(filename))
         
-        file_loc = file.save_file()
+        file_loc = file.write_file()
         fileinfo = FileInfo.from_crinfo(self.get_test_filepath(f"crinfo/{filename}.crinfo"))
 
         self.assertTrue(file.fileinfo.strictly_equal(fileinfo))
@@ -175,7 +186,7 @@ class TestFile(unittest.TestCase):
     def test_file_info_preserved_from_multiple_loads(self):
         filename = 'huge_text_file.txt'
         file = File.from_file(self.get_test_filepath(filename))
-        file.save_file()
+        file.write_file()
             
         file1 = File.from_file(self.get_test_filepath(filename))
         file2 = File.from_file(self.get_test_filepath(filename))
@@ -188,7 +199,7 @@ class TestFile(unittest.TestCase):
         filename = 'huge_text_file.txt'
         file = File.from_file(self.get_test_filepath(filename))
 
-        file.save_file()
+        file.write_file()
         file2 = File.from_file(self.get_test_filepath(filename))
 
         fileinfo1 = file.fileinfo
@@ -203,9 +214,15 @@ class TestFile(unittest.TestCase):
         for temp_file in self.temp_files:
             file = File.from_temp_file(self.get_test_filepath(f"{self.filename}.crtemp"))
             sleep(0.1)
-            temp_file.save_temp_file()
+            temp_file.write_temp_file()
 
             self.assertTrue(file.fileinfo.strictly_equal(temp_file.fileinfo), f"FileInfo does not match for {temp_file.__temp_type}")
+
+    def test_load_empty_fileinfo(self):
+        empty_tempfile = self.temp_files[5]
+        empty_fileinfo = empty_tempfile.fileinfo
+        new_empty_tempfile = File.from_crinfo(empty_fileinfo.filepath)
+        self.assertEqual(new_empty_tempfile.fileinfo, empty_tempfile.fileinfo)
 
     def test_save_temp_file_and_load(self):
         for temp_file in self.temp_files:
@@ -220,4 +237,181 @@ class TestFile(unittest.TestCase):
     def tearDown(self):
         self._test_dir.cleanup()
 
+class TestSharedDirectory(unittest.TestCase):
+    def setUp(self):
+        self._test_dir = TemporaryDirectory()
+        self.test_dir:Path = Path(self._test_dir.name)
 
+        # Load test files into test_dir
+        copy_dir(TEST_SHARED_DIR_PATH, self.test_dir)
+
+        # Load full file
+        self.filename = "suck.jpg"
+        self.full_file:File = File.from_file(self.test_dir.joinpath(self.filename))
+        self.full_file.write_file()
+
+    def test_full_file(self):
+        shared_dir_path = self.test_dir.joinpath("full_file")
+        shared_dir = SharedDirectory(shared_dir_path)
+        shared_dir.refresh()
+
+        # File should be generated
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.blocks, self.full_file.blocks)
+    
+    def test_full_file_no_crinfo(self):
+        shared_dir_path = self.test_dir.joinpath("full_file_no_crinfo")
+        shared_dir = SharedDirectory(shared_dir_path)
+        shared_dir.refresh()
+
+        # File should be generated
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.blocks, self.full_file.blocks)
+    
+    def test_temp_file(self):
+        shared_dir_path = self.test_dir.joinpath("temp_file")
+        shared_dir = SharedDirectory(shared_dir_path)
+        shared_dir.refresh()
+
+        # File should be generated
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.downloaded_blockcount, 20)
+        self.assertEqual(file.fileinfo.block_count, 280)
+    
+    def test_empty_file(self):
+        shared_dir_path = self.test_dir.joinpath("empty_file")
+        shared_dir = SharedDirectory(shared_dir_path)
+        shared_dir.refresh()
+
+        # File should be generated
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.downloaded_blockcount, 0)
+        self.assertEqual(file.fileinfo.block_count, 280)
+    
+    def test_add_file(self):
+        """
+        Copies the test file into a new shared directory `test_add_file`, \
+        and compares that test file with the copy.
+
+        This tests `add_file()`.
+        """
+        f_data = b''
+        with self.test_dir.joinpath(self.filename).open('rb') as f:
+            f_data = f.read()
+        shared_dir_path = self.test_dir.joinpath("test_add_file")
+        shared_dir_path.mkdir(exist_ok=True)
+        shared_dir = SharedDirectory(shared_dir_path)
+
+        shared_dir.add_file(self.filename, f_data)
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.blocks, self.full_file.blocks)
+
+        # Ensure only one file in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 1)
+        self.assertEqual(crinfo_count, 1)
+        self.assertEqual(len(shared_dir.filemap), 1)
+
+        # Test a repeated call
+        shared_dir.add_file(self.filename, f_data)
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.blocks, self.full_file.blocks)
+        
+        # Ensure only one file in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 1)
+        self.assertEqual(crinfo_count, 1)
+        self.assertEqual(len(shared_dir.filemap), 1)
+
+    def test_delete_file(self):
+        """
+        Copies the test file into a new shared directory `test_add_file`, \
+        and tries to delete it.
+        """
+        f_data = b''
+        with self.test_dir.joinpath(self.filename).open('rb') as f:
+            f_data = f.read()
+        shared_dir_path = self.test_dir.joinpath("test_delete_file")
+        shared_dir_path.mkdir(exist_ok=True)
+        shared_dir = SharedDirectory(shared_dir_path)
+
+        shared_dir.add_file(self.filename, f_data)
+        file = shared_dir.filemap.get(self.filename)
+        # Ensure only one file in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 1)
+        self.assertEqual(crinfo_count, 1)
+        self.assertEqual(len(shared_dir.filemap), 1)
+        
+        shared_dir.delete_file(self.filename)
+        # Ensure NO files in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 0)
+        self.assertEqual(crinfo_count, 0)
+        self.assertEqual(len(shared_dir.filemap), 0)
+
+    def test_add_fileinfo(self):
+        """
+        Creates an empty tempfile from the test file's FileInfo, and compares accordingly.
+        """
+        finfo_data = b''
+        with self.full_file.fileinfo.filepath.open('rb') as f:
+            finfo_data = f.read()
+        shared_dir_path = self.test_dir.joinpath("test_add_fileinfo")
+        shared_dir_path.mkdir(exist_ok=True)
+        shared_dir = SharedDirectory(shared_dir_path)
+
+        shared_dir.add_fileinfo(self.filename, finfo_data)
+        file = shared_dir.filemap.get(self.filename)
+        self.assertEqual(file.fileinfo, self.full_file.fileinfo)
+        self.assertEqual(file.downloaded_blockcount, 0)
+
+        # Ensure only one file in the directories
+        file_count = 0
+        crinfo_count = 0
+        for item in shared_dir.dirpath.iterdir():
+            if item.is_file():
+                file_count += 1
+        for item in shared_dir.crinfo_dirpath.iterdir():
+            if item.is_file():
+                crinfo_count += 1
+        self.assertEqual(file_count, 1)
+        self.assertEqual(crinfo_count, 1)
+        self.assertEqual(len(shared_dir.filemap), 1)
+
+    def tearDown(self):
+        self._test_dir.cleanup()

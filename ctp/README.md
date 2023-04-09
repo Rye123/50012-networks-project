@@ -107,16 +107,30 @@ The above API abstracts away the handling of socket sending and receiving of the
   - The first bit determines if the message is a **request** (`0`) or a **response** (`1`).
   - Note that for `NO_OP`, no response is expected. This is intended to be a data-less packet used for liveness checks with the server. By convention, we leave the first bit as `0`.
   
-| Message Type       | Bit Representation |
-| ------------------ | ------------------ |
-| `STATUS_REQUEST`   | `0000 0000`        |
-| `STATUS_RESPONSE`  | `0000 0001`        |
-| `NOTIFICATION`     | `0000 0010`        |
-| `NOTIFICATION_ACK` | `0000 0011`        |
-| `BLOCK_REQUEST`    | `0000 0100`        |
-| `BLOCK_RESPONSE`   | `0000 0101`        |
-| `NO_OP`            | `1111 1110`        |
 
+| Message Type           | Bit Representation | Description                                                                                                                                                                           |
+| ---------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STATUS_REQUEST`       | `0000 0000`        | (No data)                                                                                                                                                                             |
+| `STATUS_RESPONSE`      | `0000 0001`        | Data in ASCII, `status: 0/1`                                                                                                                                                          |
+| `NOTIFICATION`         | `0000 0010`        | Data in ASCII.                                                                                                                                                                        |
+| `NOTIFICATION_ACK`     | `0000 0011`        | Data in ASCII.                                                                                                                                                                        |
+| `BLOCK_REQUEST`        | `0000 0100`        | Data packetised according to `util.files.Block`.                                                                                                                                      |
+| `BLOCK_RESPONSE`       | `0000 0101`        | Data packetised according to `util.files.Block`.                                                                                                                                      |
+| `CLUSTER_JOIN_REQUEST` | `0000 0110`        | Peer requesting the server to join a client. No data expected.                                                                                                                        |
+| `CLUSTER_JOIN_ACK`     | `0000 0111`        | Server message containing a peerlist. This is sent as a response to a `CLUSTER_JOIN` request.                                                                                         | 
+| `MANIFEST_REQUEST`     | `0000 1000`        | Request for the manifest `CRINFO` file from the server.                                                                                                                               |
+| `MANIFEST_RESPONSE`    | `0000 1001`        | Response containing the manifest `CRINFO` file. This file contains a list of filenames in the cluster.                                                                                |
+| `CRINFO_REQUEST`       | `0000 1010`        | Request a specific file's `CRINFO`. Data in ASCII, `filename: ...`.                                                                                                                   |
+| `CRINFO_RESPONSE`      | `0000 1011`        | Response containing the file's `CRINFO`. Data in bytes.                                                                                                                               |
+| `NEW_CRINFO_NOTIF`     | `0000 1100`        | 'Request' giving the server a new `CRINFO` file. Filename is first, followed by `b\r\n\r\n` before the actual file is sent in bytes.                                                  |
+| `NEW_CRINFO_ACK`       | `0000 1101`        | Response indicating successful receipt of the `CRINFO`. If the file already exists, the response is a message in ASCII `"error: exists"`. Otherwise, the message will be `"success"`. |
+| `PEERLIST_PUSH`        | `0001 0000`        | Server message containing a peerlist.                                                                                                                                                 |
+| `UNEXPECTED_REQ`       | `1111 1001`        | Response stating that a given request was unexpected or unsupported. Error message will be ASCII.                                                                                     |
+| `INVALID_REQUEST`      | `1111 1101`        | Response regarding an invalid request (client-side error).                                                                                                                            |
+| `NO_OP`                | `1111 1110`        | A request that expects no response.                                                                                                                                                   |
+| `SERVER_ERROR`         | `1111 1111`        | Response stating an error on the server's end.                                                                                                                                        |
+
+- **Sequence Number (4 bytes)**: A 4-byte unsigned integer representing a randomly-chosen sequence number. If the message is a response, this will be the sequence number of the request, incremented by one.
 - **Cluster ID (32 bytes)**: A 32-byte value representing the ID of the cluster.
 - **Sender ID (32 bytes)**: A 32-byte value representing the ID of the message sender.
 
@@ -126,19 +140,38 @@ Total header length is 65 bytes.
 ### Data
 Depends on message type:
 - `STATUS_REQUEST`: Request a status update from the destination.
-- `STATUS_RESPONSE`: Respond to a status request.
-  - Status
+- `STATUS_RESPONSE`: Respond to a status request. (ASCII)
+  - Status 
     - `0`: Cannot service further requests
     - `1`: Alive
-- `NOTIFICATION`: Inform the destination of something
-  - Message
+- `NOTIFICATION`: Inform the destination of something (ASCII)
+  - Message 
 - `NOTIFICATION_ACK`: Acknowledge a notification
-- `BLOCK_REQUEST`: Request a given block from the destination.
+- `BLOCK_REQUEST`: Request a given block from the destination. (defined under `util.files.Block`)
   ```
   {filehash}-{block id}
   ```
-- `BLOCK_RESPONSE`: Respond to a given block request
+- `BLOCK_RESPONSE`: Respond to a given block request. (defined under `util.files.Block`)
   ```
   {filehash}-{block id}-{status}\r\n\r\n
   {block data (if any)}
   ```
+- `CLUSTER_JOIN_REQUEST`: Request to join a cluster. No data expected, the cluster is indicated in the `cluster_id` part of the packet.
+- `CLUSTER_JOIN_RESPONSE`: Response from the CTP server. (ASCII)
+  - Data contains a list of peers in the form: `{peer_id} {address}`, separated by `\r\n`.
+    - `address` is in the form `{IP address} {port}`.
+- `MANIFEST_REQUEST`: Request the file manifest `CRINFO`, which will update the `CRINFO` file `/manifest/crinfo/.manifest.crinfo`.
+- `MANIFEST_RESPONSE`: Response from the server, containing the manifest `CRINFO` file. (bytes)
+  - The `data` portion of the response is the entire file.
+- `CRINFO_REQUEST`: Request a `CRINFO` file from the server. A peer might do this after receiving an updated manifest. 
+  - `data` contains the filename to request.
+- `CRINFO_RESPONSE`: Returns the `CRINFO` file corresponding to the filename.
+- `NEW_CRINFO_NOTIF`: Send a `CRINFO` file to the server. This file in bytes is prepended with `{filename}\r\n\r\n` in bytes.
+- `NEW_CRINFO_NOTIF_ACK`: Acknowledge the sent `CRINFO` file. The requester should then send a manifest request to request the updated manifest, if the response message was not `"error: exists"`.
+- `INVALID_REQUEST`: A response indicating a client-side error. (ASCII)
+  - `data` contains the error.
+- `NO_OP`: A request that expects no response. (ASCII).
+  - `data` will be in ASCII.
+- `UNEXPECTED_REQ`: A response indicating an unexpected request from the client. (ASCII)
+  - `data` contains the error.
+
