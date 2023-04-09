@@ -118,12 +118,13 @@ class SharedDirectory:
     def add_fileinfo(self, filename: str, data: bytes):
         """
         Adds a new FileInfo to this directory, writing it to disk.
-        - This creates the corresponding File in the parent directory (i.e. empty tempfile)
+        - This OVERWRITES the corresponding File in the parent directory (i.e. empty tempfile)
         - `filename` should be the name of the actual file, not of the CRINFO file.
         """
         fileinfo = FileInfo._from_bytes(self, filename, data)
         fileinfo.write()
         file = File.from_crinfo(fileinfo.filepath)
+        file.delete_local_copy()
         file.write_temp_file()
         self.filemap[filename] = file
     
@@ -156,6 +157,8 @@ class FileInfo:
         self.filehash = filehash
         self.filename = filename
         self.filesize = filesize
+        if filesize == 0:
+            raise FileError("Given FileInfo size is zero.")
         self.timestamp = timestamp
         self.block_count = ceil(filesize / MAX_BLOCK_SIZE)
     
@@ -343,6 +346,8 @@ class File:
         self.blocks:List[Block] = []
         self.shareddir = fileinfo.shareddir
         self.crinfo_filepath = fileinfo.filepath
+        if self.fileinfo.filesize == 0:
+            raise FileError("Empty file.")
 
         # Initialise blocks list
         for i in range(self.fileinfo.block_count):
