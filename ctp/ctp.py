@@ -25,9 +25,10 @@ class CTPMessageType(IntEnum):
     CRINFO_RESPONSE       = 0b00001011 # Response containing the CRINFO file data.
     NEW_CRINFO_NOTIF      = 0b00001100 # A 'request' sending a new CRINFO file to the server.
     NEW_CRINFO_NOTIF_ACK  = 0b00001101 # A response containing the updated file manifest (same as MANIFEST_RESPONSE)
+    UNEXPECTED_REQ        = 0b11111001 # A RESPONSE that indicates an unexpected request.
     INVALID_REQ           = 0b11111101 # A RESPONSE that indicates an error with the request sender.
     NO_OP                 = 0b11111110 # A no-operation message, typically used for keep-alive
-    UNEXPECTED_REQ        = 0b11111111 # A RESPONSE that indicates an unexpected request.
+    SERVER_ERROR          = 0b11111111 # A RESPONSE that indicates a server error.
 
     def is_request(self) -> bool:
         """
