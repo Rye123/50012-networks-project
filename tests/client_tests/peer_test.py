@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Tuple
+import traceback
 
 ### DEEP DARK MAGIC TO ALLOW FOR ABSOLUTE IMPORT
 from pathlib import Path
@@ -37,7 +38,6 @@ def setup_peer(this_peer_id: str) -> Peer:
                 peerlist.append(peer_info)
     
     # Set peerlist
-
     this_peer = Peer(
         peer_info=this_peerinfo,
         shared_dir_path=Path(f"./tests/client_tests/data/{this_peer_shareddir}"),
@@ -58,27 +58,46 @@ if __name__ == "__main__":
         lines = f.readlines()
         this_peer_id = lines[line_index].split(" ")[2]
 
-    peer = setup_peer(this_peer_id)
+    peer:Peer = None
+    try:
+        peer = setup_peer(this_peer_id)
+    except PeerError:
+        print("Could not setup peer.")
+        sys.exit(1)
+    
+    if peer is None:
+        print("Uncaught error caused invalid peer return.")
+        sys.exit(1)
 
-    peer.listen()
-    print("\n\nPeer has been set up.\nCommands:\n\tSCAN: Scan local directory for new files\n\tSYNC PEERS: Sync peers with the bootstrapped peerlist\n\tSYNC FILES: Syncs files with peers\n\tSHARE: Share file with cluster\n\tEXIT: Exit. Duh.")
+    commands = {
+        "SCAN": "Scan local directory for new files",
+        "SYNC PEERS": "Sync peerlist from server",
+        "SYNC MANIFEST": "Sync manifest from server",
+        "SYNC FILES": "Sync files with known peers", 
+        "SYNC": "Calls the above sync functions in the following manner: SYNC PEERS, SYNC MANIFEST, SYNC FILES.",
+        "SHARE": "Syncs local files that aren't in the server manifest with the cluster.",
+        "EXIT": "Exit the program."
+    }
+
+    print("\n\nPeer has been set up.\nCommands:\n\t" + "\n\t".join([f"{command}: {desc}" for command, desc in commands.items()]))
 
     # Main Loop
     try:
         while True:
             command = input().upper()
             match command:
-                case "SYNC":
-                    print("SYNC: Syncing peers.")
-                    peer.sync_peermap()
-                    print("SYNC: Peers synced.")
-                    print("SYNC: Syncing files.")
-                    peer.sync_files()
-                    print("SYNC: Files synced.")
+                case "SCAN":
+                    print("SCAN: Updating files from local directory...")
+                    peer.scan_local_dir()
+                    print("SCAN: Files updated.")
                 case "SYNC PEERS":
-                    print("SYNC PEERS: Syncing peers.")
+                    print("SYNC PEERS: Syncing peers...")
                     peer.sync_peermap()
                     print("SYNC PEERS: Peers synced.")
+                case "SYNC MANIFEST":
+                    print("SYNC MANIFEST: Syncing manifest...")
+                    peer.sync_manifest()
+                    print("SYNC MANIFEST: Manifest synced.")
                 case "SYNC FILES":
                     print("SYNC FILES: Syncing files.")
                     peer.sync_files()
@@ -87,15 +106,22 @@ if __name__ == "__main__":
                     print("SHARE: Sharing files with cluster.")
                     peer.share()
                     print("SHARE: Files shared.")
-                case "SCAN":
-                    print("SCAN: Updating files from local directory...")
-                    peer.scan_local_dir()
-                    print("SCAN: Files updated.")
+                case "SYNC":
+                    print("SYNC: Syncing all...")
+                    peer.sync_peermap()
+                    print("SYNC PEERS: Peers synced.")
+                    peer.sync_manifest()
+                    print("SYNC MANIFEST: Manifest synced.")
+                    peer.sync_files()
+                    print("SYNC FILES: Files synced.")
+                    print("SYNC: Sync completed.")
                 case "EXIT":
                     print("-- Exiting... --")
                     break
     except KeyboardInterrupt:
         print("-- Exiting... --")
+    except Exception:
+        print("-- Exiting due to exception... --")
     finally:
         peer.end()
         print("-- Peer ended. --")
