@@ -380,7 +380,7 @@ class CTPPeer:
             try:
                 self._send_message(message, dest_addr)
                 response = None
-                if message.msg_type == CTPMessageType.NO_OP: # we expect no response
+                if message.msg_type == CTPMessageType.NO_OP or message.msg_type == CTPMessageType.PEERLIST_PUSH: # we expect no response
                     return None
                 
                 response = self.listener.get_response(
