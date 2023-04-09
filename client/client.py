@@ -1,7 +1,8 @@
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Union
 from pathlib import Path
 from copy import deepcopy, copy
 from time import sleep
+from traceback import format_exc
 import logging
 from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType, CTPConnectionError, AddressType
 from util import FileInfo, File, FileError, Block
@@ -43,6 +44,20 @@ class PeerInfo:
         self.cluster_id = cluster_id
         self.peer_id = peer_id
         self.address = address
+
+class PeerError(Exception):
+    """
+    Generic error in peer.
+    """
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+class ServerConnectionError(Exception):
+    """
+    Error with the connection with the server.
+    """
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
 
 class PeerRequestHandler(RequestHandler):
     def __init__(self, peer: 'Peer', request: CTPMessage, client_addr: AddressType):
@@ -95,6 +110,7 @@ class PeerRequestHandler(RequestHandler):
                 # Found, return the response if it's downloaded
                 if block.downloaded:
                     resp_packet = block.pack()
+                    break
                 else:
                     # it's not downloaded, but we DID find it
                     break
@@ -119,7 +135,7 @@ class PeerRequestHandler(RequestHandler):
         Handle unknown request by returning the status.
         """
         data = b"status: 1"
-        self.peer._log("debug", "unknown request")
+        logger.debug("Unknown response")
         self.send_response(
             CTPMessageType.STATUS_RESPONSE,
             data
@@ -139,6 +155,8 @@ class Peer(CTPPeer):
 
     The local filemap is represented by `shared_dir.filemap`, while `manifest_filelist` represents the fileinfos known by the server.
     """
+    FILE_MANIFEST_FILENAME = ".crmanifest"
+
     def __init__(self, peer_info: PeerInfo, shared_dir_path: Path, server_addr: AddressType, initial_peerlist:List[PeerInfo]=[]):
         """
         Initialise the peer, with a given `peer_info` object.
@@ -162,6 +180,15 @@ class Peer(CTPPeer):
         self.scan_local_dir()
         self._bootstrap_peermap(initial_peerlist)
         self.sync_peermap()
+
+        self.listen()
+        try:
+            self.sync_manifest()
+        except Exception as e:
+            logger.critical("Fatal error encountered. " + format_exc())
+            self.end()
+            raise PeerError("Could not start Peer.")
+
     
     def join_cluster(self):
         response = self.send_request_to_server(
@@ -234,6 +261,66 @@ class Peer(CTPPeer):
         peer_id = list(self.peermap.keys())[peer_index]
         return self.peermap.get(peer_id)
     
+    def _update_manifest_file(self):
+        """
+        Updates the manifest file, based on the manifest file CRINFO.
+        """
+        retries = 1 # number of retries to send for EVERY request
+
+        manifest_file = self.manifestdir.filemap.get(self.FILE_MANIFEST_FILENAME)
+        if manifest_file is not None:
+            manifest_file.delete_local_copy()  # clear the existing manifest
+        logger.debug("Updating manifest file...")
+        for block in manifest_file.blocks:
+            if not block.downloaded:
+                request_pkt = block.pack()
+                response = self.send_request_to_server(
+                    CTPMessageType.BLOCK_REQUEST,
+                    data=request_pkt,
+                    timeout=2,
+                    retries=retries
+                )
+
+                if response is None:
+                    # Store what we have first, then exit
+                    manifest_file.write_temp_file()
+                    raise ServerConnectionError()
+
+                response_pkt = response.data
+                response_block = Block.unpack(response_pkt)
+
+                if response_block is not None and response_block.downloaded:
+                    block.downloaded = True
+                    block.data = response_block.data
+                    self._log("debug", f"Request: block {block.block_id}, Manifest File: HIT")
+                    break
+                else:
+                    self._log("debug", f"Request: block {block.block_id}, Manifest File: MISS")
+                    pass
+        
+        if manifest_file.downloaded: 
+            # ONLY write if it's downloaded.
+            # This allows us to continue requesting from other peers if the server goes down.
+            manifest_file.write_file()
+
+        logger.debug("Manifest file updated.")
+
+    def _parse_manifest_file(self):
+        """
+        Parses the manifest file
+        """
+        logger.debug("Parsing manifest...")
+        manifest_file = self.manifestdir.filemap.get(self.FILE_MANIFEST_FILENAME)
+        if not manifest_file.downloaded:
+            raise RuntimeError("Cannot parse manifest file, manifest file not fully downloaded.")
+        
+        # Use the currently stored version.
+        with manifest_file.filepath.open('rb') as f:
+            header, data = f.read().decode('ascii').split('\r\n\r\n', 1)
+            filenames = data.split('\r\n')
+            self.manifest_filelist = filenames
+        logger.debug("Manifest parsed.")
+
     def sync_manifest(self):
         """
         Get the latest file manifest from the server, and update \
@@ -242,20 +329,28 @@ class Peer(CTPPeer):
         Then, update the local filemap (`shareddir.filemap`) by requesting \
         all necessary fileinfos from the server.
         """
-        pass
-        # response:CTPMessage = self.send_request_to_server(
-        #     CTPMessageType.MANIFEST_REQUEST, 
-        #     b'',
-        #     timeout=1,
-        #     retries=3
-        # )
+        response:CTPMessage = self.send_request_to_server(
+            CTPMessageType.MANIFEST_REQUEST, 
+            b'',
+            timeout=1,
+            retries=3
+        )
 
-        # if response.msg_type != CTPMessageType.MANIFEST_RESPONSE:
-        #     raise ValueError("Could not connect") #TODO: create a proper connectionerror
+        if response is None:
+            raise ServerConnectionError("Could not connect to server.")
 
-        # # Overwrite existing manifest
-        # with self.manifest_crinfo_path.joinpath("").open('wb') as f:
-        #     f.write(response.data)
+        if response.msg_type == CTPMessageType.SERVER_ERROR:
+            logger.debug(response)
+            raise ServerConnectionError("Failed to sync manifest due to server error")
+
+        if response.msg_type != CTPMessageType.MANIFEST_RESPONSE:
+            raise ServerConnectionError("Unknown response from server.")
+        
+        # Overwrite existing manifest
+        self.manifestdir.add_fileinfo(self.FILE_MANIFEST_FILENAME, response.data)
+        self._update_manifest_file()
+        self._parse_manifest_file()
+        print(self.manifest_filelist)
     
     def share(self):
         """
@@ -350,10 +445,10 @@ class Peer(CTPPeer):
                     if response_block is not None and response_block.downloaded:
                         block.downloaded = True
                         block.data = response_block.data
-                        logger.debug(f"Request: block {block.block_id}, file {file.fileinfo.filename} from {dest_peer.peer_id}: HIT")
+                        self._log("debug", f"Request: block {block.block_id}, file {file.fileinfo.filename} from {dest_peer.peer_id}: HIT")
                         break
                     else:
-                        logger.debug(f"Request: block {block.block_id}, file {file.fileinfo.filename} from {dest_peer.peer_id}: MISS")
+                        self._log("debug", f"Request: block {block.block_id}, file {file.fileinfo.filename} from {dest_peer.peer_id}: MISS")
                         pass
             logger.debug(f"Progress: {file}")
             self.store_file(file)
@@ -398,7 +493,7 @@ class Peer(CTPPeer):
             self.store_file(file)
         logger.info("Files saved.")
 
-    def send_request(self, msg_type: CTPMessageType, data: bytes, dest_peer_id: str, timeout: float = 1, retries: int = 0) -> CTPMessage:
+    def send_request(self, msg_type: CTPMessageType, data: bytes, dest_peer_id: str, timeout: float = 1, retries: int = 0) -> Union[CTPMessage, None]:
         """
         Sends a request to another peer. Returns the request, or returns `None` if the send failed.
         - Calls `handle_down_peer()` if there was a connection error.
@@ -416,7 +511,10 @@ class Peer(CTPPeer):
         except CTPConnectionError:
             return None
 
-    def send_request_to_server(self, msg_type: CTPMessageType, data: bytes, timeout: float = 1, retries: int = 0) -> CTPMessage:
+    def send_request_to_server(self, msg_type: CTPMessageType, data: bytes, timeout: float = 1, retries: int = 0) -> Union[CTPMessage, None]:
+        """
+        Sends a request to the server. Returns the response, or `None`.
+        """
         dest_addr = self.server_addr
         try:
             response = super().send_request(msg_type, data, dest_addr, timeout, retries)

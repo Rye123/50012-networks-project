@@ -105,9 +105,10 @@ class ServerRequestHandler(RequestHandler):
             self.peer_id
         )
         self.peer._send_message(response, self.client_addr)
-        self.peer._log("debug", f"Responded with {response.msg_type.name}.")
+        logger.debug(f"Responded with {response.msg_type.name}.")
     
     def handle(self, request: CTPMessage):
+        logger.debug(f"Received {request.msg_type.name}.")
         try:
             match request.msg_type:
                 case CTPMessageType.STATUS_REQUEST:
@@ -135,7 +136,35 @@ class ServerRequestHandler(RequestHandler):
         self.send_response(CTPMessageType.STATUS_RESPONSE, b'status: 1')
 
     def handle_block_request(self, request: CTPMessage):
-        return super().handle_block_request(request)
+        # Parse request
+        packet = request.data
+        requested_block = Block.unpack(packet)
+
+        # Check if we have the block (in manifestdir)
+        manifest_file = self.peer.manifestdir.filemap.get(self.peer.FILE_MANIFEST_FILENAME)
+        if requested_block.filehash != manifest_file.fileinfo.filehash:
+            self.send_response(CTPMessageType.INVALID_REQ, b'server does not serve files other than the manifest')
+            return
+        
+        for block in manifest_file.blocks:
+            if block.block_id != requested_block.block_id:
+                continue
+            # Found, return response
+            if block.downloaded:
+                self.send_response(
+                    CTPMessageType.BLOCK_RESPONSE,
+                    block.pack()
+                )
+            else:
+                # we don't have it. why don't we have it why why why
+                self.send_response(CTPMessageType.SERVER_ERROR, b'help')
+                logger.critical(f"Server does not have {block.block_id}.")
+                
+            return
+        
+        self.send_response(CTPMessageType.INVALID_REQ, b'requested block does not exist')
+        logger.debug(f"Client requested for {requested_block.block_id}, which does not exist.")
+        
 
     def handle_cluster_join_request(self, request: CTPMessage):
         # Create new PeerInfo object from the requestor
@@ -278,11 +307,10 @@ class Server(CTPPeer):
         Updates the server's local file manifest based on the current list of FileInfos.
         """
         filenames = sorted(self.fileinfo_map.keys())
-        print(filenames)
-        manifest_bytes = ('\r\n'.join(filenames)).encode('ascii')
+        manifest_bytes = ('CRMANIFEST\r\n\r\n' + '\r\n'.join(filenames)).encode('ascii')
         self.manifestdir.add_file(self.FILE_MANIFEST_FILENAME, manifest_bytes)
 
-        logger.info(f"Updated stored manifest.")
+        logger.debug(f"Updated stored manifest.")
 
     def _parse_manifest(self):
         """
@@ -295,7 +323,7 @@ class Server(CTPPeer):
         # Otherwise, create it
         if manifest_file is None:
             logger.debug("No existing manifest, creating one.")
-            self.manifestdir.add_file(self.FILE_MANIFEST_FILENAME, b'')
+            self.manifestdir.add_file(self.FILE_MANIFEST_FILENAME, b'CRMANIFEST\r\n\r\n')
             manifest_file = self.manifestdir.filemap.get(self.FILE_MANIFEST_FILENAME, None)
 
             # if it's still None let's just quit while we're still ahead
@@ -303,7 +331,7 @@ class Server(CTPPeer):
                 raise ServerError("Manifest File could not be created.")
 
         # Now, overwrite.
-        data = manifest_file.data.decode('ascii')
+        header, data = manifest_file.data.decode('ascii').split('\r\n\r\n', 1)
         filenames:List[str] = data.split('\r\n')
         for filename in filenames:
             filename = filename.strip()
