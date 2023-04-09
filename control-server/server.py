@@ -119,7 +119,7 @@ class ServerRequestHandler(RequestHandler):
                     self.handle_cluster_join_request(request)
                 case CTPMessageType.MANIFEST_REQUEST:
                     self.handle_manifest_request(request)
-                case CTPMessageType.CRINFO_RESPONSE:
+                case CTPMessageType.CRINFO_REQUEST:
                     self.handle_crinfo_request(request)
                 case CTPMessageType.NEW_CRINFO_NOTIF:
                     self.handle_new_crinfo_notif(request)
@@ -224,9 +224,37 @@ class ServerRequestHandler(RequestHandler):
             CTPMessageType.MANIFEST_RESPONSE,
             manifest_crinfo_b
         )
+        logger.info("Returned manifest.")
 
     def handle_crinfo_request(self, request: CTPMessage):
-        pass
+        # Request data is in the form filename: {filename}.
+        data = request.data.decode('ascii').split(": ", 1)
+        filename = data[1]
+
+        # Return the appropriate file
+        if filename in self.peer.fileinfo_map.keys():
+            data = b''
+            with self.peer.fileinfo_map.get(filename).filepath.open('rb') as f:
+                data = f.read()
+
+            if data != b'':
+                self.send_response(
+                    CTPMessageType.CRINFO_RESPONSE,
+                    data
+                )
+                logger.info(f"Returned fileinfo for {filename}")
+                return
+            self.send_response(
+                CTPMessageType.SERVER_ERROR,
+                b''
+            )
+            logger.error(f"Could not read fileinfo {filename}")
+        else:
+            self.send_response(
+                CTPMessageType.INVALID_REQ,
+                b'unknown filename'
+            )
+            logger.info(f"Could not locate fileinfo for {filename}")
 
     def handle_no_op(self, request: CTPMessage):
         pass
@@ -249,6 +277,9 @@ class Server(CTPPeer):
     Since it doesn't have its own `cluster_id`, several methods have been \
     overwritten.
     - `clusters`: A dictionary linking a `cluster_id` to the `Cluster` object.
+    - `shareddir`: `SharedDirectory` object associated with the known fileinfos
+    - `manifestdir`: `SharedDirectory` object associated with the file manifest.
+    - `fileinfo_map`: Dictionary associating a filename to a `FileInfo` object.
     """
     FILE_MANIFEST_FILENAME = ".crmanifest"
 

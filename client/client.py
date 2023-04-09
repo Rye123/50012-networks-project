@@ -326,6 +326,46 @@ class Peer(CTPPeer):
             self.manifest_filelist = filenames
         logger.debug("Manifest parsed.")
 
+    def _req_missing_fileinfos_from_manifest(self) -> int:
+        """
+        Based on the file manifest, download fileinfos from the server \
+        and update local `shareddir.filemap`.
+
+        Returns the total number of fileinfos downloaded.
+        """
+        # Identify missing fileinfos
+        missing_count = 0
+        for filename in self.manifest_filelist:
+            if filename not in self.shareddir.filemap.keys():
+                # Request file
+                request_data = f"filename: {filename}"
+
+                response:CTPMessage = self.send_request_to_server(
+                    CTPMessageType.CRINFO_REQUEST,
+                    request_data.encode('ascii'),
+                    timeout=1,
+                    retries=3
+                )
+
+                if response is None:
+                    raise ServerConnectionError("Could not connect to server.")
+
+                if response.msg_type == CTPMessageType.SERVER_ERROR:
+                    logger.debug(response)
+                    raise ServerConnectionError("Failed to sync manifest due to server error")
+                
+                if response.msg_type == CTPMessageType.INVALID_REQ:
+                    logger.debug("Server didn't have the fileinfo.")
+                    return
+
+                if response.msg_type != CTPMessageType.CRINFO_RESPONSE:
+                    raise ServerConnectionError("Unknown response from server.")
+
+                # Response data is the file's CRINFO
+                self.shareddir.add_fileinfo(filename, response.data)
+                missing_count += 1
+        return missing_count
+
     def sync_manifest(self):
         """
         Get the latest file manifest from the server, and update \
@@ -355,7 +395,13 @@ class Peer(CTPPeer):
         self.manifestdir.add_fileinfo(self.FILE_MANIFEST_FILENAME, response.data)
         self._update_manifest_file()
         self._parse_manifest_file()
-        print(self.manifest_filelist)
+
+        logger.debug("Manifest updated: " + str(self.manifest_filelist))
+
+        # Request missing fileinfos from the server
+        fileinfos_updated = self._req_missing_fileinfos_from_manifest()
+        logger.debug(f"Fileinfos updated: {fileinfos_updated}")
+
     
     def share(self):
         """

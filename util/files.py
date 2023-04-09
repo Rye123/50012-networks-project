@@ -29,7 +29,7 @@ class SharedDirectory:
     A shared directory instance.
     - `dirpath`
     - `crinfo_dirpath`
-    - `filemap`
+    - `filemap`: A dictionary between the filename and the File object.
     """
     CRINFO_DIRNAME = 'crinfo'
 
