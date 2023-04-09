@@ -63,8 +63,6 @@ if __name__ == "__main__":
     peer.listen()
     print("\n\nPeer has been set up.\nCommands:\n\tSCAN: Scan local directory for new files\n\tSYNC PEERS: Sync peers with the bootstrapped peerlist\n\tSYNC FILES: Syncs files with peers\n\tSHARE: Share file with cluster\n\tEXIT: Exit. Duh.")
 
-
-
     # Main Loop
     try:
         while True:
@@ -87,7 +85,7 @@ if __name__ == "__main__":
                     print("SYNC FILES: Files synced.")
                 case "SHARE":
                     print("SHARE: Sharing files with cluster.")
-                    peer.share_files()
+                    peer.share()
                     print("SHARE: Files shared.")
                 case "SCAN":
                     print("SCAN: Updating files from local directory...")

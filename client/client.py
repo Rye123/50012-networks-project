@@ -131,7 +131,13 @@ class Peer(CTPPeer):
     This isn't strictly necessary (we can just work with a global peermap variable), \
     but we might want to expand this class to involve other context variables.
     - `peermap`: Maps the peer ID to the corresponding `PeerInfo` object.
-    
+    - `server_addr`
+    - `shared_dir`: Encapsulates file management.
+        - Files are accessed through `shared_dir.filemap`.
+    - `manifest_path`: Allows us to effectively treat the manifest file as another file to be shared.
+    - `manifest_filelist`: The list of filenames in the manifest. 
+
+    The local filemap is represented by `shared_dir.filemap`, while `manifest_filelist` represents the fileinfos known by the server.
     """
     def __init__(self, peer_info: PeerInfo, shared_dir_path: Path, server_addr: AddressType, initial_peerlist:List[PeerInfo]=[]):
         """
@@ -150,6 +156,7 @@ class Peer(CTPPeer):
 
         manifest_path = shared_dir_path.joinpath("manifest")
         self.manifestdir = SharedDirectory(manifest_path)
+        self.manifest_filelist:List[str] = {} # a list of filenames, extracted from manifestdir
 
         # Initialisation
         self.scan_local_dir()
@@ -189,7 +196,86 @@ class Peer(CTPPeer):
         
         #TODO: auto send no_ops for liveness.
 
-    def share(self, file: File):
+    def listen(self):
+        """
+        Listens for incoming messages -- these could be requests, or \
+        responses to this peer's requests.
+
+        This should call the lower level CTP functions.
+        """
+        logger.info(f"{self.short_peer_id}: Listener initiated.")
+        super().listen()
+    
+    def sync_peermap(self):
+        """
+        Syncs the current peerlist.
+        """
+        pass
+    
+    def _bootstrap_peermap(self, peerlist: List[PeerInfo]):
+        """
+        Sets up `peermap` with a bootstrapped list of peers.
+        """
+        for peerinfo in peerlist:
+            self.peermap[peerinfo.peer_id] = peerinfo
+
+    def get_peer(self, context=Dict[str, Any]) -> PeerInfo:
+        """
+        Gets a (known) peer to interact with.
+
+        The decisionmaking process is done based on the context, this should be \
+        using a `context` dictionary determined by `sync_files`.
+
+        TODO: Add additional details to context for smarter decisionmaking.
+        """
+        if len(self.peermap) == 0:
+            return None
+        peer_index = context.get("counter", 0) % len(self.peermap)
+        peer_id = list(self.peermap.keys())[peer_index]
+        return self.peermap.get(peer_id)
+    
+    def sync_manifest(self):
+        """
+        Get the latest file manifest from the server, and update \
+        the `manifest_filemap`.
+
+        Then, update the local filemap (`shareddir.filemap`) by requesting \
+        all necessary fileinfos from the server.
+        """
+        pass
+        # response:CTPMessage = self.send_request_to_server(
+        #     CTPMessageType.MANIFEST_REQUEST, 
+        #     b'',
+        #     timeout=1,
+        #     retries=3
+        # )
+
+        # if response.msg_type != CTPMessageType.MANIFEST_RESPONSE:
+        #     raise ValueError("Could not connect") #TODO: create a proper connectionerror
+
+        # # Overwrite existing manifest
+        # with self.manifest_crinfo_path.joinpath("").open('wb') as f:
+        #     f.write(response.data)
+    
+    def share(self):
+        """
+        Share files with cluster.
+        1. Scans the server manifest (`./manifest`).
+        2. Scans local files (filelist)
+        3. For each local file that is not in the manifest, share the file with the server
+        """
+        filelist = [f for f in self.shareddir.filemap.values() if (f.downloaded)]
+        for file in filelist:
+            if file.fileinfo.filename not in self.manifest_filelist: # i.e. server doesn't know this file
+                self._share_file(file)
+
+    def scan_local_dir(self):
+        """
+        Updates the in-memory shared directory with the local directory.
+        """
+        self.shareddir.refresh()
+    
+    def _share_file(self, file: File):
         """
         Shares `file`. 
         This should share the given file's `FileInfo` object with the entire \
@@ -221,63 +307,11 @@ class Peer(CTPPeer):
             print(response_2)
             # TODO: work with the response
         elif response.data == b"error: exists":
-            print("file alr shared")
-
-    def listen(self):
-        """
-        Listens for incoming messages -- these could be requests, or \
-        responses to this peer's requests.
-
-        This should call the lower level CTP functions.
-        """
-        logger.info(f"{self.short_peer_id}: Listener initiated.")
-        super().listen()
-    
-    def sync_peermap(self):
-        """
-        Syncs the current peerlist.
-        """
-        pass
-    
-    def _bootstrap_peermap(self, peerlist: List[PeerInfo]):
-        """
-        Sets up `peermap` with a bootstrapped list of peers.
-        """
-        for peerinfo in peerlist:
-            self.peermap[peerinfo.peer_id] = peerinfo
-
-    def get_peer(self, context=Dict[str, Any]) -> PeerInfo:
-        """
-        Gets a peer to interact with.
-
-        The decisionmaking process is done based on the context, this should be \
-        using a `context` dictionary determined by `sync_files`.
-
-        TODO: Add additional details to context for smarter decisionmaking.
-        """
-        if len(self.peermap) == 0:
-            return None
-        peer_index = context.get("counter", 0) % len(self.peermap)
-        peer_id = list(self.peermap.keys())[peer_index]
-        return self.peermap.get(peer_id)
-    
-    def share_files(self):
-        """
-        Shares all shareable files with the server.
-
-        TODO: for now this shares ALL downloaded files, we don't actually want that.
-        - Need to find a way to indicate 'ownership'.
-        """
-        filelist = [f for f in self.shareddir.filemap.values() if (f.downloaded)]
-        for file in filelist:
-            self.share(file)
+            logger.debug("File already exists.")
 
     def sync_files(self):
         """
-        Based on the CURRENT file manifest (i.e. the current directory of \
-        `.crinfo` files), send out block requests to missing files.
-
-        This will not automatically sync the file manifest.
+        Based on the current local filemap, request file blocks from known peers.
         """
         counter = 0 # counter for requests sent, used for naive peer usage
         retries = 1 # number of retries to send for EVERY request
@@ -337,14 +371,33 @@ class Peer(CTPPeer):
         else:
             file.write_temp_file()
 
-    def send_request_to_server(self, msg_type: CTPMessageType, data: bytes, timeout: float = 1, retries: int = 0) -> CTPMessage:
-        dest_addr = self.server_addr
-        try:
-            response = super().send_request(msg_type, data, dest_addr, timeout, retries)
-            return response
-        except CTPConnectionError:
-            return None
+    def _report(self, peer):
+        """
+        Report the given peer for inactivity to the server.
+        """
+        pass
+
+    def handle_down_peer(self, dest_peer_id: str):
+        """
+        Handles what to do if the destination peer is down.
+
+        For now, we just pop the peer from the list.
+        #TODO: send request to the server, to check if WE are the ones that are disconnected.
+        - This will also allow us to 'complain' to the server that the peer is down.
+        """
+        logger.info(f"Could not connect to {dest_peer_id}.")
+        self.peermap.pop(dest_peer_id, None)
     
+    def end(self):
+        logger.info("Ending peer...")
+        super().end()
+
+        logger.info("Saving files...")
+        # Save all current in-memory versions of each file.
+        for file in self.shareddir.filemap.values():
+            self.store_file(file)
+        logger.info("Files saved.")
+
     def send_request(self, msg_type: CTPMessageType, data: bytes, dest_peer_id: str, timeout: float = 1, retries: int = 0) -> CTPMessage:
         """
         Sends a request to another peer. Returns the request, or returns `None` if the send failed.
@@ -362,55 +415,11 @@ class Peer(CTPPeer):
             return response
         except CTPConnectionError:
             return None
-    
-    def handle_down_peer(self, dest_peer_id: str):
-        """
-        Handles what to do if the destination peer is down.
 
-        For now, we just pop the peer from the list.
-        #TODO: send request to the server, to check if WE are the ones that are disconnected.
-        - This will also allow us to 'complain' to the server that the peer is down.
-        """
-        logger.info(f"Could not connect to {dest_peer_id}.")
-        self.peermap.pop(dest_peer_id, None)
-    
-    def scan_local_dir(self):
-        """
-        Updates the in-memory shared directory with the local directory.
-        """
-        self.shareddir.refresh()
-
-    def sync_manifest(self):
-        """
-        Sync the file manifest with the server.
-        """
-        pass
-        # response:CTPMessage = self.send_request_to_server(
-        #     CTPMessageType.MANIFEST_REQUEST, 
-        #     b'',
-        #     timeout=1,
-        #     retries=3
-        # )
-
-        # if response.msg_type != CTPMessageType.MANIFEST_RESPONSE:
-        #     raise ValueError("Could not connect") #TODO: create a proper connectionerror
-
-        # # Overwrite existing manifest
-        # with self.manifest_crinfo_path.joinpath("").open('wb') as f:
-        #     f.write(response.data)
-
-    def end(self):
-        logger.info("Ending peer...")
-        super().end()
-
-        logger.info("Saving files...")
-        # Save all current in-memory versions of each file.
-        for file in self.shareddir.filemap.values():
-            self.store_file(file)
-        logger.info("Files saved.")
-
-    def _report(self, peer):
-        """
-        Report the given peer for inactivity to the server.
-        """
-        pass
+    def send_request_to_server(self, msg_type: CTPMessageType, data: bytes, timeout: float = 1, retries: int = 0) -> CTPMessage:
+        dest_addr = self.server_addr
+        try:
+            response = super().send_request(msg_type, data, dest_addr, timeout, retries)
+            return response
+        except CTPConnectionError:
+            return None
