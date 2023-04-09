@@ -61,11 +61,33 @@ class ServerConnectionError(Exception):
 
 class PeerRequestHandler(RequestHandler):
     def __init__(self, peer: 'Peer', request: CTPMessage, client_addr: AddressType):
-        super().__init__(peer, request, client_addr)
         self.peer = peer # just to overwrite the unofficial class
+        self.request_addr = client_addr
+        super().__init__(peer, request, client_addr)
 
     def cleanup(self):
         self.close()
+    
+    def handle(self, request: CTPMessage):
+        logger.debug(f"Received {request.msg_type.name} from {self.request_addr}")
+        try:
+            match request.msg_type:
+                case CTPMessageType.STATUS_REQUEST:
+                    self.handle_status_request(request)
+                case CTPMessageType.NOTIFICATION:
+                    self.handle_notification(request)
+                case CTPMessageType.BLOCK_REQUEST:
+                    self.handle_block_request(request)
+                case CTPMessageType.PEERLIST_PUSH:
+                    self.handle_peerlist_push(request)
+                case CTPMessageType.NO_OP:
+                    self.handle_no_op(request)
+                case _:
+                    self.handle_unknown_request(request)
+        except Exception as e:
+            logger.error(str(e))
+            if request.msg_type != CTPMessageType.NO_OP:
+                self.send_response(CTPMessageType.SERVER_ERROR, b'')
     
     def handle_status_request(self, request: CTPMessage):
         """
@@ -126,7 +148,11 @@ class PeerRequestHandler(RequestHandler):
             CTPMessageType.BLOCK_RESPONSE,
             resp_packet
         )
-    
+
+    def handle_peerlist_push(self, request: CTPMessage):
+        peerlist = request.data
+        self.peer._parse_peerlist(peerlist)
+
     def handle_no_op(self, request: CTPMessage):
         pass
 
@@ -178,18 +204,41 @@ class Peer(CTPPeer):
 
         # Initialisation
         self.scan_local_dir()
-        self._bootstrap_peermap(initial_peerlist)
-        self.sync_peermap()
+        # self._bootstrap_peermap(initial_peerlist)
+        # self.sync_peermap()
+        #TODO: determine if this is necessary, since we have the server push new peers anyway
 
         self.listen()
         try:
+            self.join_cluster()
             self.sync_manifest()
         except Exception as e:
             logger.critical("Fatal error encountered. " + format_exc())
             self.end()
             raise PeerError("Could not start Peer.")
 
-    
+    def _parse_peerlist(self, peerlist: bytes):
+        """
+        Parses a peerlist and updates the local peermap.
+        """
+        # Process the response (list of peers in ASCII)
+        data = peerlist.decode('ascii')
+        lines = data.split("\r\n")
+        peerlist:List[PeerInfo] = []
+        for line in lines:
+            try:
+                peer_id, ip_addr, port = line.split(' ')
+                peer_info = PeerInfo(self.cluster_id, peer_id, (ip_addr, int(port)))
+                peerlist.append(peer_info)
+            except ValueError:
+                raise ValueError("Invalid response from server.")
+        logger.info("New peerlist received: " + str([peer.peer_id for peer in peerlist]))
+        # Overwrite peermap
+        self.peermap = {}
+        for peerinfo in peerlist:
+            if peerinfo.peer_id != self.peer_id and peerinfo.address != self.peer_addr:
+                self.peermap[peerinfo.peer_id] = peerinfo
+
     def join_cluster(self):
         response = self.send_request_to_server(
             CTPMessageType.CLUSTER_JOIN_REQUEST,
@@ -202,25 +251,7 @@ class Peer(CTPPeer):
             raise ValueError(response.data.decode('ascii'))
         if response.msg_type != CTPMessageType.CLUSTER_JOIN_RESPONSE:
             raise ValueError(f"Unexpected response {response.msg_type}")
-
-        # Process the response (list of peers in ASCII)
-        data = response.data.decode('ascii')
-        lines = data.split("\r\n")
-        peerlist:List[PeerInfo] = []
-        for line in lines:
-            try:
-                peer_id, ip_addr, port = line.split(' ')
-                peer_info = PeerInfo(self.cluster_id, peer_id, (ip_addr, int(port)))
-                peerlist.append(peer_info)
-            except ValueError:
-                raise ValueError("Invalid response from server.")
-        
-        # Overwrite peermap
-        self.peermap = {}
-        for peerinfo in peerlist:
-            if peerinfo.peer_id != self.peer_id and peerinfo.address != self.peer_addr:
-                self.peermap[peerinfo.peer_id] = peerinfo
-        
+        self._parse_peerlist(response.data)
         #TODO: auto send no_ops for liveness.
 
     def listen(self):
@@ -230,7 +261,7 @@ class Peer(CTPPeer):
 
         This should call the lower level CTP functions.
         """
-        logger.info(f"{self.short_peer_id}: Listener initiated.")
+        logger.info(f"{self.short_peer_id}: Listener initiated on {self.peer_addr}.")
         super().listen()
     
     def sync_peermap(self):
@@ -402,7 +433,6 @@ class Peer(CTPPeer):
         fileinfos_updated = self._req_missing_fileinfos_from_manifest()
         logger.debug(f"Fileinfos updated: {fileinfos_updated}")
 
-    
     def share(self):
         """
         Share files with cluster.
@@ -450,7 +480,6 @@ class Peer(CTPPeer):
                 CTPMessageType.MANIFEST_REQUEST,
                 b''
             )
-            print(response_2)
             # TODO: work with the response
         elif response.data == b"error: exists":
             logger.debug("File already exists.")
@@ -549,7 +578,7 @@ class Peer(CTPPeer):
         Sends a request to another peer. Returns the request, or returns `None` if the send failed.
         - Calls `handle_down_peer()` if there was a connection error.
         """
-        sleep(0.5) #TODO: REMOVE FOR PRODUCTION, this is for testing
+        # sleep(0.5) #TODO: REMOVE FOR PRODUCTION, this is for testing
 
         if dest_peer_id not in self.peermap.keys():
             return None

@@ -39,6 +39,10 @@ class Cluster:
         self.peermap:Dict[str, PeerInfo] = {}
 
     def add_peer(self, peer: 'PeerInfo'):
+        """
+        Adds a peer to the cluster.
+        - This overrides the existing peer in there if any.
+        """
         self.peermap[peer.peer_id] = peer
         logger.info(f"Cluster {self.cluster_id}: Added new peer {peer.peer_id}")
 
@@ -165,7 +169,6 @@ class ServerRequestHandler(RequestHandler):
         self.send_response(CTPMessageType.INVALID_REQ, b'requested block does not exist')
         logger.debug(f"Client requested for {requested_block.block_id}, which does not exist.")
         
-
     def handle_cluster_join_request(self, request: CTPMessage):
         # Create new PeerInfo object from the requestor
         cluster_id = self.cluster_id
@@ -185,6 +188,11 @@ class ServerRequestHandler(RequestHandler):
             CTPMessageType.CLUSTER_JOIN_RESPONSE,
             data_str.encode('ascii')
         )
+
+        # Update the other peers
+        self.peer.push_peerlist(cluster_id, peer_id)
+        logger.info(f"New peer: {peer_id}. All peers updated.")
+        
 
     def handle_new_crinfo_notif(self, request: CTPMessage):
         # Request contains the new CRINFO file in bytes.
@@ -332,6 +340,24 @@ class Server(CTPPeer):
         """
         self._update_manifest()
         return self.manifestdir.filemap.get(self.FILE_MANIFEST_FILENAME).fileinfo
+    
+    def push_peerlist(self, cluster_id: str, peer_id: str=None):
+        """
+        Pushes an updated peerlist to all peers in a given cluster, excluding a given peer_id
+        - This is to update all existing peers except a given peer.
+        - If we want to update ALL for some reason, leave peer_id empty.
+        """
+        cluster = self.clusters[cluster_id]
+        for peer in cluster.peermap.values():
+            if peer_id is not None:
+                if peer.peer_id == peer_id:
+                    continue
+            self.send_request(
+                cluster_id,
+                CTPMessageType.PEERLIST_PUSH,
+                cluster.generate_peerlist().encode('ascii'),
+                peer.address
+            )
 
     def _update_manifest(self):
         """

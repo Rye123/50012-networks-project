@@ -71,10 +71,11 @@ if __name__ == "__main__":
 
     commands = {
         "SCAN": "Scan local directory for new files",
+        "JOIN": "Joins the hardcoded cluster",
         "SYNC PEERS": "Sync peerlist from server",
         "SYNC MANIFEST": "Sync manifest from server",
         "SYNC FILES": "Sync files with known peers", 
-        "SYNC": "Calls the above sync functions in the following manner: SYNC PEERS, SYNC MANIFEST, SYNC FILES.",
+        "SYNC": "Calls sync functions in this order: SYNC PEERS, SYNC MANIFEST, SYNC FILES.",
         "SHARE": "Syncs local files that aren't in the server manifest with the cluster.",
         "EXIT": "Exit the program."
     }
@@ -90,6 +91,10 @@ if __name__ == "__main__":
                     print("SCAN: Updating files from local directory...")
                     peer.scan_local_dir()
                     print("SCAN: Files updated.")
+                case "JOIN":
+                    print(f"JOIN: Joining cluster {peer.cluster_id}...")
+                    peer.join_cluster()
+                    print("JOIN: Cluster joined.")
                 case "SYNC PEERS":
                     print("SYNC PEERS: Syncing peers...")
                     peer.sync_peermap()
@@ -99,7 +104,7 @@ if __name__ == "__main__":
                     peer.sync_manifest()
                     print("SYNC MANIFEST: Manifest synced.")
                 case "SYNC FILES":
-                    print("SYNC FILES: Syncing files.")
+                    print("SYNC FILES: Syncing files...")
                     peer.sync_files()
                     print("SYNC FILES: Files synced.")
                 case "SHARE":
@@ -108,10 +113,13 @@ if __name__ == "__main__":
                     print("SHARE: Files shared.")
                 case "SYNC":
                     print("SYNC: Syncing all...")
-                    peer.sync_peermap()
-                    print("SYNC PEERS: Peers synced.")
+                    # print("SYNC PEERS: Syncing peers...")
+                    # peer.sync_peermap()
+                    # print("SYNC PEERS: Peers synced.")
+                    print("SYNC MANIFEST: Syncing manifest...")
                     peer.sync_manifest()
                     print("SYNC MANIFEST: Manifest synced.")
+                    print("SYNC FILES: Syncing files...")
                     peer.sync_files()
                     print("SYNC FILES: Files synced.")
                     print("SYNC: Sync completed.")
