@@ -476,11 +476,7 @@ class Peer(CTPPeer):
         
         if response.data == b"success":
             # Send a follow-up asking for the updated manifest.
-            response_2 = self.send_request_to_server(
-                CTPMessageType.MANIFEST_REQUEST,
-                b''
-            )
-            # TODO: work with the response
+            self.sync_manifest()
         elif response.data == b"error: exists":
             logger.debug("File already exists.")
 
