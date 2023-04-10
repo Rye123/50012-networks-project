@@ -31,7 +31,7 @@ logger.addHandler(standardHandler)
 
 BOOTSTRAPPED_PEERLIST:List['PeerInfo'] = []
 SERVER_PEER_ID = '000____ctp_server_peer_id____000'
-DEFAULT_SERVER_ADDRESS = ('127.0.0.1', 6969)
+DEFAULT_SERVER_ADDRESS = ('172.31.7.143', 6969)
 
 class Cluster:
     def __init__(self, cluster_id: str):
@@ -401,7 +401,7 @@ class Server(CTPPeer):
         manifest_file.write_file()
 
 if __name__ == "__main__":
-    server = Server(DEFAULT_SERVER_ADDRESS, Path('./control-server/data'))
+    server = Server(DEFAULT_SERVER_ADDRESS, Path('./data'))
     try:
         server.add_cluster("3f80e91dc65311ed93abeddb088b3faa")
 
