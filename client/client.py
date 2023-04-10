@@ -1,8 +1,9 @@
 from typing import List, Tuple, Dict, Any, Union
 from pathlib import Path
 from copy import deepcopy, copy
-from time import sleep
+from time import sleep, time
 from traceback import format_exc
+from threading import Thread, Event
 import logging
 from ctp import CTPPeer, RequestHandler, CTPMessage, CTPMessageType, CTPConnectionError, AddressType
 from util import FileInfo, File, FileError, Block
@@ -194,6 +195,9 @@ class Peer(CTPPeer):
             requestHandlerClass=PeerRequestHandler
         )
         self.shareddir = SharedDirectory(shared_dir_path)
+        self.keep_alive_thread = Thread(target=self._keep_alive, args=[10.0]) # Keep alive will send every 10 seconds
+        self.stop_signal:Event = Event() # stop signal for child threads
+        self.stop_signal.clear()
 
         self.peermap:Dict[str, PeerInfo] = dict()
         self.server_addr = server_addr
@@ -239,6 +243,27 @@ class Peer(CTPPeer):
             if peerinfo.peer_id != self.peer_id and peerinfo.address != self.peer_addr:
                 self.peermap[peerinfo.peer_id] = peerinfo
 
+    def _keep_alive(self, interval:float):
+        """
+        Sends a `NO_OP` packet to the server every `interval` seconds.
+        - Since we use the `sleep` method to put the thread to sleep for a short interval, `interval` should be more than 1 \
+        second for better accuracy.
+        """
+        start_time = time()
+        while not self.stop_signal.is_set():
+            # Check time
+            cur_time = time()
+            if (cur_time - start_time) >= interval:
+                # Send packet
+                self.send_request_to_server(
+                    CTPMessageType.NO_OP,
+                    b''
+                )
+
+                # Update start_time
+                start_time = cur_time
+            sleep(1)
+
     def join_cluster(self):
         response = self.send_request_to_server(
             CTPMessageType.CLUSTER_JOIN_REQUEST,
@@ -252,7 +277,11 @@ class Peer(CTPPeer):
         if response.msg_type != CTPMessageType.CLUSTER_JOIN_RESPONSE:
             raise ValueError(f"Unexpected response {response.msg_type}")
         self._parse_peerlist(response.data)
-        #TODO: auto send no_ops for liveness.
+        
+        # Set thread to auto-send no_op packets for liveness.
+        logger.info("keep_alive sender set.")
+        self.stop_signal.clear()
+        self.keep_alive_thread.start()
 
     def listen(self):
         """
@@ -562,6 +591,12 @@ class Peer(CTPPeer):
     def end(self):
         logger.info("Ending peer...")
         super().end()
+
+        logger.debug("Killing keep_alive sender...")
+        self.stop_signal.set()
+        if self.keep_alive_thread.is_alive():
+            self.keep_alive_thread.join()
+        logger.info("keep_alive sender stopped.")
 
         logger.info("Saving files...")
         # Save all current in-memory versions of each file.
