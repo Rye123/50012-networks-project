@@ -311,7 +311,6 @@ class CTPPeer:
         self.peer_addr = peer_addr
         self.requestHandlerClass:Type[RequestHandler] = requestHandlerClass
         self.sock = socket(AF_INET, SOCK_DGRAM)
-        self.sock.bind(peer_addr)
         self.listener = Listener(self)
 
     def _log(self, level: str, message: str):

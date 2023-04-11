@@ -32,7 +32,7 @@ logger.addHandler(standardHandler)
 
 BOOTSTRAPPED_PEERLIST:List['PeerInfo'] = []
 SERVER_PEER_ID = '000____ctp_server_peer_id____000'
-DEFAULT_SERVER_ADDRESS = ('127.0.0.1', 6969)
+DEFAULT_SERVER_ADDRESS = ('0.0.0.0', 6969)
 
 class Cluster:
     TIMEOUT_INTERVAL = 30.0
@@ -367,7 +367,6 @@ class Server(CTPPeer):
         self.requestHandlerClass = ServerRequestHandler
         self.peer_addr = address
         self.sock = socket(AF_INET, SOCK_DGRAM)
-        self.sock.bind(address)
         self.listener = Listener(self)
     
     def send_request(self, cluster_id: str, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float = 1, retries: int = 0) -> CTPMessage:

@@ -23,7 +23,7 @@ util_logger.setLevel(UTIL_LOGGING_LEVEL)
 logger.addHandler(standardHandler)
 
 BOOTSTRAPPED_PEERLIST:List['PeerInfo'] = []
-DEFAULT_SERVER_ADDRESS = ('127.0.0.1', 6969)
+DEFAULT_SERVER_ADDRESS = ('0.0.0.0', 6969)
 
 class Cluster:
     """
