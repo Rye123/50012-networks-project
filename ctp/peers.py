@@ -14,7 +14,7 @@ from ctp.ctp import PLACEHOLDER_CLUSTER_ID, PLACEHOLDER_SENDER_ID
 
 AddressType = Tuple[str, int]
 ENCODING = 'ascii'
-MAX_INT_VALUE = (2**32) - 1 # max int to fit in 4 bytes
+MAX_INT_VALUE = (2**32) - 2 # max int to fit in 4 bytes
 logger = logging.getLogger(__name__)
 
 class RequestHandler(ABC):
@@ -311,7 +311,6 @@ class CTPPeer:
         self.peer_addr = peer_addr
         self.requestHandlerClass:Type[RequestHandler] = requestHandlerClass
         self.sock = socket(AF_INET, SOCK_DGRAM)
-        self.sock.bind(peer_addr)
         self.listener = Listener(self)
 
     def _log(self, level: str, message: str):

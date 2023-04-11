@@ -1,6 +1,7 @@
 import traceback
 from time import sleep
 from typing import Type, Tuple, List, Dict, Any
+from threading import Timer, Event, Thread
 import logging
 from socket import socket, AF_INET, SOCK_DGRAM
 
@@ -31,12 +32,17 @@ logger.addHandler(standardHandler)
 
 BOOTSTRAPPED_PEERLIST:List['PeerInfo'] = []
 SERVER_PEER_ID = '000____ctp_server_peer_id____000'
-DEFAULT_SERVER_ADDRESS = ('172.31.7.143', 6969)
+DEFAULT_SERVER_ADDRESS = ('0.0.0.0', 6969)
 
 class Cluster:
+    TIMEOUT_INTERVAL = 30.0
+
     def __init__(self, cluster_id: str):
         self.cluster_id = cluster_id
         self.peermap:Dict[str, PeerInfo] = {}
+        self.peertimers:Dict[str, Timer] = {}
+        self.peer_left:Event = Event() # if set, a peer has left. This is to indicate a peerleft event to the server.
+                                       #TODO: refactor so this works for a change to the peerlist
 
     def add_peer(self, peer: 'PeerInfo'):
         """
@@ -44,11 +50,19 @@ class Cluster:
         - This overrides the existing peer in there if any.
         """
         self.peermap[peer.peer_id] = peer
+        self.start_peertimer(peer.peer_id)
         logger.info(f"Cluster {self.cluster_id}: Added new peer {peer.peer_id}")
 
     def remove_peer(self, peer_id: str):
         self.peermap.pop(peer_id, None)
+        self.peer_left.set()
         logger.info(f"Cluster {self.cluster_id}: Removed peer {peer_id}")
+    
+    def peer_left_ack(self):
+        """
+        Clears the `peer_left` Event.
+        """
+        self.peer_left.clear()
     
     def generate_peerlist(self) -> str:
         """
@@ -61,6 +75,39 @@ class Cluster:
             addr = self.peermap.get(peer_id).address
             peer_lines.append(f"{peer_id} {addr[0]} {addr[1]}")
         return "\r\n".join(peer_lines)
+
+    def start_peertimer(self, peer_id: str):
+        """
+        Starts the timer associated with a peer.
+        """
+        self.peertimers[peer_id] = Timer(self.TIMEOUT_INTERVAL, self.peer_timeout, args=[peer_id])
+        self.peertimers[peer_id].start()
+
+    def reset_peertimer(self, peer_id: str):
+        """
+        Reset the timer associated with a peer.
+        - `peer_id`: The peer associated with the timer.
+        """
+        self.peertimers[peer_id].cancel()
+        self.start_peertimer(peer_id)
+    
+    def peer_timeout(self, peer_id: str):
+        """
+        Timeout for a peer. The peer will be kicked out.
+        """
+        if self.peertimers[peer_id].is_alive(): # kill the timer if it's still alive
+            self.peertimers[peer_id].cancel()
+            self.peertimers[peer_id] = None
+        self.remove_peer(peer_id)
+    
+    def end(self):
+        """
+        Ends the cluster, and all corresponding timeouts for the peers.
+        """
+        for peertimer in self.peertimers.values():
+            if peertimer is not None:
+                peertimer.cancel()
+
 
 class PeerInfo:
     """
@@ -112,7 +159,14 @@ class ServerRequestHandler(RequestHandler):
         logger.debug(f"Responded with {response.msg_type.name}.")
     
     def handle(self, request: CTPMessage):
-        logger.debug(f"Received {request.msg_type.name}.")
+        logger.debug(f"Received {request.msg_type.name} from {request.sender_id}.")
+        # Update timer for the peer
+        cluster_id = request.cluster_id
+        peer_id = request.sender_id
+        if peer_id in self.peer.clusters[cluster_id].peermap.keys():
+            self.peer.clusters[cluster_id].reset_peertimer(peer_id)
+
+        # Match request
         try:
             match request.msg_type:
                 case CTPMessageType.STATUS_REQUEST:
@@ -298,7 +352,9 @@ class Server(CTPPeer):
         self.peer_id = SERVER_PEER_ID
         self.short_peer_id = SERVER_PEER_ID[:6]
         self.clusters:Dict[str, Cluster] = {}
+        self.clusters_peerlist_watchers:Dict[str, Thread] = {}
         self.cluster_id = None
+        self.clusters_stop_signal:Event = Event()
 
         self.fileinfo_map:Dict[str, FileInfo] = {} # maps filename to FileInfo object
         self.shareddir = SharedDirectory(shared_dir_path)
@@ -311,9 +367,8 @@ class Server(CTPPeer):
         self.requestHandlerClass = ServerRequestHandler
         self.peer_addr = address
         self.sock = socket(AF_INET, SOCK_DGRAM)
-        self.sock.bind(address)
         self.listener = Listener(self)
-
+    
     def send_request(self, cluster_id: str, msg_type: CTPMessageType, data: bytes, dest_addr: AddressType, timeout: float = 1, retries: int = 0) -> CTPMessage:
         if cluster_id not in self.clusters.keys():
             raise ValueError("No such cluster.")
@@ -324,9 +379,30 @@ class Server(CTPPeer):
         
         return response
 
+    def _watch_cluster(self, cluster: Cluster):
+        """
+        Watches for the `peer_left` Event on a given cluster.
+        """
+        cluster.peer_left_ack()
+
+        while not self.clusters_stop_signal.is_set():
+            while not cluster.peer_left.is_set():
+                sleep(1)
+                if self.clusters_stop_signal.is_set():
+                    cluster.peer_left_ack()
+                    return
+            
+            # push out the notification about peer leaving
+            self.push_peerlist(cluster.cluster_id)
+            logger.info("Peerlist pushed.")
+            cluster.peer_left_ack()
+        cluster.peer_left_ack()
+
     def add_cluster(self, cluster_id: str):
         new_cluster = Cluster(cluster_id)
         self.clusters[cluster_id] = new_cluster
+        self.clusters_peerlist_watchers[cluster_id] = Thread(target=self._watch_cluster, args=[new_cluster])
+        self.clusters_peerlist_watchers[cluster_id].start()
     
     def add_fileinfo(self, fileinfo: FileInfo):
         self.fileinfo_map[fileinfo.filename] = fileinfo
@@ -345,7 +421,7 @@ class Server(CTPPeer):
         """
         Pushes an updated peerlist to all peers in a given cluster, excluding a given peer_id
         - This is to update all existing peers except a given peer.
-        - If we want to update ALL for some reason, leave peer_id empty.
+        - If we want to update ALL (e.g. for peer_left events)
         """
         cluster = self.clusters[cluster_id]
         for peer in cluster.peermap.values():
@@ -358,6 +434,19 @@ class Server(CTPPeer):
                 cluster.generate_peerlist().encode('ascii'),
                 peer.address
             )
+
+    def end(self):
+        # Stop watching clusters
+        self.clusters_stop_signal.set()
+        logger.debug("Watchers on cluster peerlists stopped.")
+
+        # End clusters
+        for cluster in self.clusters.values():
+            cluster.end()
+        logger.debug("Clusters deinitialised.")
+
+        super().end()
+
 
     def _update_manifest(self):
         """
