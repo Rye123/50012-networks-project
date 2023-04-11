@@ -490,7 +490,7 @@ class Server(CTPPeer):
         manifest_file.write_file()
 
 if __name__ == "__main__":
-    server = Server(DEFAULT_SERVER_ADDRESS, Path('./control-server/data'))
+    server = Server(DEFAULT_SERVER_ADDRESS, Path('./data'))
     try:
         server.add_cluster("3f80e91dc65311ed93abeddb088b3faa")
 
