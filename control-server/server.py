@@ -32,7 +32,7 @@ logger.addHandler(standardHandler)
 
 BOOTSTRAPPED_PEERLIST:List['PeerInfo'] = []
 SERVER_PEER_ID = '000____ctp_server_peer_id____000'
-DEFAULT_SERVER_ADDRESS = ('0.0.0.0', 6969)
+DEFAULT_SERVER_ADDRESS = ('', 6969)
 
 class Cluster:
     TIMEOUT_INTERVAL = 30.0
@@ -488,18 +488,3 @@ class Server(CTPPeer):
         logger.info(f"Loaded {len(self.fileinfo_map)} FileInfo objects.")
 
         manifest_file.write_file()
-
-if __name__ == "__main__":
-    server = Server(DEFAULT_SERVER_ADDRESS, Path('./data'))
-    try:
-        server.add_cluster("3f80e91dc65311ed93abeddb088b3faa")
-
-        server.listen()
-        while True:
-            pass
-    except KeyboardInterrupt:
-        print("Interrupt")
-    except Exception:
-        print(traceback.format_exc())
-    finally:
-        server.end()

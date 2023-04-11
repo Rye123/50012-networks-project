@@ -194,6 +194,7 @@ class Listener:
         self._responses:Queue[Tuple[CTPMessage, AddressType]] = Queue() # queue of responses for request-senders to check
         self._new_response_arrived = Event() # signal to indicate a new response has arrived
         self._listen_thread = None
+        self.sock.bind(self.peer.peer_addr)
         self._stop_listening = Event()
     
     def listen(self):
