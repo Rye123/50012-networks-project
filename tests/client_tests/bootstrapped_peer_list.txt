@@ -2,3 +2,5 @@
 0.0.0.0 6971 002___ctp_test_peer_number___002 peer2_dir
 0.0.0.0 6972 003___ctp_test_peer_number___003 peer3_dir
 0.0.0.0 6973 004___ctp_test_peer_number___004 peer4_dir
+10.0.0.1 6969 005___ctp_test_peer_number__005 peer5_dir
+10.0.0.2 6969 006___ctp_test_peer_number__006 peer6_dir

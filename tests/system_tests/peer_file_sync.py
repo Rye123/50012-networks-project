@@ -25,7 +25,6 @@ class SingleSwitchTopo(Topo):
 
 
 
-    pass
 def Test():
     '''
     main function to run all tests
@@ -51,8 +50,8 @@ def Test():
     h2.setIP('10.0.0.2')
     h1.cmd('cd ../../')
     h2.cmd('cd ../../')
-    out1 = h1.cmd(f'echo "scan" && echo "sync" | (python3 examples/example_file_peer.py 4 > test.txt) & ')
-    out2 = h2.cmd(f'echo "scan" && echo "sync" | (python3 examples/example_file_peer.py 5 > test2.txt) &')
+    out1 = h1.cmd(f'echo "scan" && echo "sync" | (python3 tests/client_tests/peer_test.py 2 > test.txt) & ')
+    out2 = h2.cmd(f'echo "scan" && echo "sync" | (python3 tests/client_tests/peer_test.py 3 > test2.txt) &')
     sleep(10)
     print(out1)
     print(out2)
